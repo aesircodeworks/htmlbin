@@ -28,6 +28,7 @@
 //   unreachable.
 
 import { Hono } from "hono";
+import * as Sentry from "@sentry/cloudflare";
 import type { Bindings, Variables } from "./types";
 import { newApiToken, newUserId } from "./crypto";
 import { createUser, getUserByGitHubId, rateLimit } from "./db";
@@ -220,10 +221,27 @@ githubOAuthRoutes.get("/auth/github/callback", async (c) => {
     }
   } catch (e) {
     console.error("github_oauth_failed", String(e));
+    // An expired or reused GitHub code is the human's to retry; anything
+    // else (bad client secret, redirect_uri mismatch, GitHub down) is ours
+    // to see, so report it. Handled here, it never reaches withSentry.
+    const ghCodeRejected =
+      e instanceof GitHubOAuthError && e.githubError === "bad_verification_code";
+    if (!ghCodeRejected) {
+      Sentry.captureException(e, {
+        tags: {
+          github_oauth_error:
+            e instanceof GitHubOAuthError ? e.githubError : "network",
+        },
+      });
+    }
     return c.html(
       verifyPage(c.env, {
         code: state,
-        error: "Couldn't reach GitHub to complete sign-in. Try again.",
+        error: ghCodeRejected
+          ? "That GitHub sign-in expired or was already used. Sign in with GitHub again."
+          : e instanceof GitHubOAuthError
+            ? "GitHub didn't accept this sign-in. The problem is on our side and has been reported."
+            : "Couldn't reach GitHub to complete sign-in. Try again.",
       }),
       502
     );
@@ -295,6 +313,17 @@ githubOAuthRoutes.get("/auth/github/callback", async (c) => {
 
 // ---------------------------------------------------------------------------
 
+// GitHub answered, but refused. `githubError` is GitHub's own error code
+// (e.g. bad_verification_code, incorrect_client_credentials,
+// redirect_uri_mismatch) or a short label for a malformed response.
+// A thrown fetch (GitHub unreachable) stays a plain Error.
+class GitHubOAuthError extends Error {
+  constructor(readonly githubError: string, message: string) {
+    super(message);
+    this.name = "GitHubOAuthError";
+  }
+}
+
 async function exchangeCode(
   code: string,
   clientId: string,
@@ -319,13 +348,22 @@ async function exchangeCode(
   try {
     json = JSON.parse(text);
   } catch {
-    throw new Error(`github token endpoint returned non-JSON: ${text.slice(0, 200)}`);
+    throw new GitHubOAuthError(
+      "non_json_response",
+      `github token endpoint returned ${res.status} non-JSON: ${text.slice(0, 200)}`
+    );
   }
   if (json.error) {
-    throw new Error(`github token error: ${json.error} ${json.error_description ?? ""}`);
+    throw new GitHubOAuthError(
+      String(json.error),
+      `github token error: ${json.error} ${json.error_description ?? ""}`
+    );
   }
   if (!json.access_token) {
-    throw new Error("github token response missing access_token");
+    throw new GitHubOAuthError(
+      "missing_access_token",
+      "github token response missing access_token"
+    );
   }
   return { access_token: json.access_token };
 }
@@ -341,11 +379,14 @@ async function fetchGitHubUser(
     },
   });
   if (!res.ok) {
-    throw new Error(`github /user returned ${res.status}`);
+    throw new GitHubOAuthError("user_fetch_failed", `github /user returned ${res.status}`);
   }
   const json = (await res.json()) as { id?: number; login?: string };
   if (typeof json.id !== "number" || typeof json.login !== "string") {
-    throw new Error("github /user response missing id/login");
+    throw new GitHubOAuthError(
+      "user_response_invalid",
+      "github /user response missing id/login"
+    );
   }
   return { id: json.id, login: json.login };
 }
