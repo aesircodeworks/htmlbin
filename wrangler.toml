@@ -26,7 +26,7 @@ PUBLIC_URL = "https://htmlbin.aesir.works"
 # Source: github.com/settings/developers → htmlbin → Client ID.
 # Authorization callback URL on the app must be
 # https://htmlbin.aesir.works/auth/github/callback.
-GITHUB_CLIENT_ID = "Ov23li6nAqCYrRIN3WSf"
+GITHUB_CLIENT_ID = "Ov23liKlRXsEd7WU3MWM"
 
 # Secrets (set with `wrangler secret put NAME`):
 #   GITHUB_CLIENT_SECRET  → GitHub OAuth app client secret
