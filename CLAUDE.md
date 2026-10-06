@@ -700,9 +700,22 @@ The workflow:
   never production bindings). `deploy` needs it to pass.
 - **PR opened or pushed to** — type-check, `wrangler versions upload`,
   post the Cloudflare preview URL as a sticky comment on the PR
-  (`https://<version-id>-htmlbin.<account>.workers.dev`).
-- **Merge to `main`** — type-check, `wrangler deploy` to production.
+  (`https://<version-id>-htmlbin.<account>.workers.dev`), then run
+  `scripts/smoke.sh` against that preview URL.
+- **Merge to `main`** — type-check, `wrangler deploy` to production,
+  then `scripts/smoke.sh` against `htmlbin.aesir.works`.
   Triggered by the merge, never by a human running wrangler.
+
+**Smoke test (`scripts/smoke.sh`, `npm run test:smoke`).** Six cheap
+requests (`/`, `/api/onboard`, `/llms.txt`, `/api/nope` → JSON 404,
+`/p/<unknown>` → HTML 404, `POST /api/auth/start`) with retries. It exists
+because deploys went out answering `503 server_misconfigured` from a
+missing secret and nobody noticed until someone curled them by hand; a
+503 prints its `error.code` in the CI log. The only write is one pending
+verification row from `/api/auth/start`, which expires and is swept. A
+red preview smoke usually means production is missing the same secret,
+since previews share its bindings. `e2e-local.sh` runs it before the
+agent e2e, so the script itself is exercised on every PR.
 
 Mandatory loop for every change:
 
@@ -923,7 +936,8 @@ wrangler.toml       ─ Cloudflare config (Worker name, D1, KV, AI, [[rules]] Co
 scripts/
   setup.mjs         ─ provisions D1 + KV, applies schema, sets pepper
   agent-e2e.sh      ─ full functional test
-  e2e-local.sh      ─ boots a throwaway local Worker and runs agent-e2e.sh (CI)
+  e2e-local.sh      ─ boots a throwaway local Worker and runs smoke.sh + agent-e2e.sh (CI)
+  smoke.sh          ─ post-deploy smoke test (CI runs it on preview + production)
   stats.mjs         ─ text-based stats snapshot (npm run stats)
   dashboard/        ─ local-only operator web UI (npm run dashboard)
     server.mjs        ─ http server + wrangler subprocess proxy

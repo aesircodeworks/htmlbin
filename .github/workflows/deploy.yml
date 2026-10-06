@@ -65,6 +65,15 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           command: deploy
 
+      # Catches a deploy that went out but can't serve, e.g. 503
+      # server_misconfigured from a missing secret. Same script as the
+      # preview check below; see scripts/smoke.sh for what it covers.
+      - name: Smoke test production
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          BASE_URL: https://htmlbin.aesir.works
+        run: ./scripts/smoke.sh
+
       # ───── PR → versioned preview ──────────────────────────────────
       # `versions upload` ships a new version of the existing Worker
       # without changing the live deployment. Cloudflare returns a
@@ -109,3 +118,18 @@ jobs:
 
             > Note: bindings (D1, KV, AI) are shared with production.
             > Avoid destructive PR tests on real data.
+
+      # Runs after the sticky comment so the preview URL is posted even
+      # when the smoke test fails. Preview versions share production's
+      # secrets and bindings, so a red check here usually means production
+      # is missing the same secret.
+      - name: Smoke test preview
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_URL: ${{ steps.extract_url.outputs.url }}
+        run: |
+          if [ -z "$BASE_URL" ]; then
+            echo "::error::No preview URL was extracted from wrangler output, so there is nothing to smoke test."
+            exit 1
+          fi
+          ./scripts/smoke.sh

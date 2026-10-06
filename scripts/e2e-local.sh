@@ -58,4 +58,6 @@ for _ in $(seq 1 60); do
   sleep 1
 done
 
+# Smoke first: agent-e2e burns through the /api/auth/start rate limit.
+BASE_URL="http://localhost:${PORT}" ./scripts/smoke.sh
 BASE_URL="http://localhost:${PORT}" ./scripts/agent-e2e.sh
