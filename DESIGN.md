@@ -437,7 +437,7 @@ Vertical order, top to bottom. Everything is centred.
      /p/1Wyf23j   cross-platform gstack …       PR WRITEUP
 
    ───────────────────────────────────────────────────────────────────
-   — htmlbin                      agent-card · /api/onboard · @utsengar
+   — htmlbin                      agent-card · /api/onboard · github
 ```
 
 **Section rhythm:** `.lsec` carries 92px top padding. The evidence block
