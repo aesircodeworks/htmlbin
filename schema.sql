@@ -44,6 +44,9 @@ CREATE TABLE IF NOT EXISTS drops (
   password_hash   TEXT,
   password_salt   TEXT,
   latest_version  INTEGER NOT NULL DEFAULT 1,
+  -- Highest version number ever minted. Never decreases, so deleted version
+  -- numbers are never reused; PUT also uses it as an optimistic lock.
+  version_seq     INTEGER NOT NULL DEFAULT 0,
   view_count      INTEGER NOT NULL DEFAULT 0,
   -- Owner-facing tag bag (JSON object, string→string). Used to attach
   -- external identifiers (repo, pr, ci_run, …) so agents can look up an
@@ -79,9 +82,13 @@ CREATE INDEX IF NOT EXISTS idx_versions_slug_version
 -- code         is the short human-typeable code (shown on verify page).
 -- poll_token   is the long secret the agent polls with.
 -- api_token    is set on success and read once, then cleared.
--- existing_user_id (optional) lets a verifying human "transfer" their
--- existing identity to a new device by typing an existing token at the
--- verify page.
+-- api_token    holds the plaintext token only between GitHub sign-in and
+--              the agent's claiming poll (at most CLAIM_TTL_MS); it is not
+--              written to `tokens` (and not usable) until claimed.
+-- expires_at   the verify deadline while pending; reset to the claim
+--              deadline when the row is verified.
+-- existing_user_id is unused. It belonged to the removed "paste an existing
+-- token" flow and is kept only so fresh installs match migrated databases.
 CREATE TABLE IF NOT EXISTS verifications (
   code              TEXT PRIMARY KEY,
   poll_token        TEXT NOT NULL UNIQUE,

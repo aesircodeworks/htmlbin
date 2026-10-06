@@ -19,6 +19,8 @@ const MAX_CONTEXT_BYTES = 64 * 1024; // 64 KB
 const MAX_DROPS_PER_USER = 500;
 const MAX_VERSIONS_PER_DROP = 200;
 const MAX_DAILY_WRITES = 500;
+const MAX_WRITES_PER_MINUTE = 60;
+const MIN_PASSCODE_LENGTH = 4;
 
 // Drop-level tag bag. Same key/value shape we filter on via
 // GET /api/drops?metadata.k=v, so the key regex is also the filter-key
@@ -36,6 +38,46 @@ export const apiRoutes = new Hono<{
   Bindings: Bindings;
   Variables: Variables;
 }>();
+
+// Every mutating /api/drops endpoint counts against the same two
+// per-account buckets: 60 writes/minute and 500 writes/day. Keyed by
+// user id, not token, so minting extra tokens doesn't buy extra quota.
+// Returns a 429 Response when either is exhausted, otherwise null.
+async function enforceWriteLimits(c: any, userId: string): Promise<Response | null> {
+  const minute = await rateLimit(
+    c.env.DB,
+    `write:${userId}`,
+    MAX_WRITES_PER_MINUTE,
+    60_000
+  );
+  if (!minute.ok) {
+    c.header("Retry-After", String(minute.retryAfter));
+    return apiError(
+      c,
+      "rate_limited",
+      `Write rate limit exceeded (${MAX_WRITES_PER_MINUTE}/min).`,
+      429,
+      { retry_after_seconds: minute.retryAfter }
+    );
+  }
+  const daily = await rateLimit(
+    c.env.DB,
+    `daily:${userId}`,
+    MAX_DAILY_WRITES,
+    86_400_000
+  );
+  if (!daily.ok) {
+    c.header("Retry-After", String(daily.retryAfter));
+    return apiError(
+      c,
+      "daily_quota_exceeded",
+      `Daily write quota of ${MAX_DAILY_WRITES} exceeded.`,
+      429,
+      { max: MAX_DAILY_WRITES, retry_after_seconds: daily.retryAfter }
+    );
+  }
+  return null;
+}
 
 apiRoutes.use("/drops", authMiddleware);
 apiRoutes.use("/drops/*", authMiddleware);
@@ -183,33 +225,8 @@ apiRoutes.on(["GET", "HEAD"], "/drops", async (c) => {
 apiRoutes.post("/drops", async (c) => {
   const user = c.get("user");
 
-  const writeRl = await rateLimit(c.env.DB, `write:${user.id}`, 60, 60_000);
-  if (!writeRl.ok) {
-    c.header("Retry-After", String(writeRl.retryAfter));
-    return apiError(
-      c,
-      "rate_limited",
-      "Write rate limit exceeded (60/min).",
-      429,
-      { retry_after_seconds: writeRl.retryAfter }
-    );
-  }
-  const dailyRl = await rateLimit(
-    c.env.DB,
-    `daily:${user.id}`,
-    MAX_DAILY_WRITES,
-    86_400_000
-  );
-  if (!dailyRl.ok) {
-    c.header("Retry-After", String(dailyRl.retryAfter));
-    return apiError(
-      c,
-      "daily_quota_exceeded",
-      `Daily write quota of ${MAX_DAILY_WRITES} exceeded.`,
-      429,
-      { max: MAX_DAILY_WRITES, retry_after_seconds: dailyRl.retryAfter }
-    );
-  }
+  const limited = await enforceWriteLimits(c, user.id);
+  if (limited) return limited;
 
   const body = (await c.req.json().catch(() => null)) as
     | {
@@ -291,8 +308,8 @@ apiRoutes.post("/drops", async (c) => {
     c.env.DB.prepare(
       `INSERT INTO drops
          (slug, user_id, title, description, password_hash, password_salt,
-          latest_version, view_count, metadata, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?)`
+          latest_version, version_seq, view_count, metadata, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 1, 1, 0, ?, ?, ?)`
     ).bind(
       slug, user.id, title, description, passcodeHash, passcodeSalt,
       metadataRaw, now, now
@@ -317,24 +334,17 @@ apiRoutes.put("/drops/:slug", async (c) => {
   if (!isValidSlug(slug))
     return apiError(c, "invalid_slug", "Slug must be 6–12 base62 chars.", 400);
 
-  const writeRl = await rateLimit(c.env.DB, `write:${user.id}`, 60, 60_000);
-  if (!writeRl.ok) {
-    c.header("Retry-After", String(writeRl.retryAfter));
-    return apiError(
-      c,
-      "rate_limited",
-      "Write rate limit exceeded (60/min).",
-      429,
-      { retry_after_seconds: writeRl.retryAfter }
-    );
-  }
+  const limited = await enforceWriteLimits(c, user.id);
+  if (limited) return limited;
 
   const drop = await getDrop(c.env.DB, slug);
   if (!drop) return apiError(c, "not_found", "No such drop.", 404);
   if (drop.user_id !== user.id)
     return apiError(c, "forbidden", "This drop belongs to another user.", 403);
 
-  if (drop.latest_version >= MAX_VERSIONS_PER_DROP)
+  // Rows written before migration 0003 can carry version_seq = 0.
+  const seq = Math.max(drop.version_seq ?? 0, drop.latest_version);
+  if (seq >= MAX_VERSIONS_PER_DROP)
     return apiError(
       c,
       "version_limit_reached",
@@ -416,7 +426,27 @@ apiRoutes.put("/drops/:slug", async (c) => {
     );
 
   const now = Date.now();
-  const nextVersion = drop.latest_version + 1;
+  const nextVersion = seq + 1;
+
+  // Reserve the version number before touching KV. The compare-and-set on
+  // version_seq means two concurrent PUTs can't both claim nextVersion (the
+  // loser would otherwise overwrite the winner's HTML in KV, then 500 on
+  // the versions primary key). A reservation whose write later fails just
+  // leaves a gap in the numbering, same as a deleted version.
+  const reserved = await c.env.DB.prepare(
+    `UPDATE drops SET version_seq = ?
+      WHERE slug = ? AND user_id = ? AND version_seq = ?`
+  )
+    .bind(nextVersion, slug, user.id, drop.version_seq ?? 0)
+    .run();
+  if ((reserved.meta?.changes ?? 0) === 0)
+    return apiError(
+      c,
+      "version_conflict",
+      "Another update to this drop landed first. Re-fetch and retry.",
+      409
+    );
+
   await c.env.DROPS_KV.put(`html:${slug}:v${nextVersion}`, body.html);
 
   await c.env.DB.batch([
@@ -450,6 +480,9 @@ apiRoutes.patch("/drops/:slug", async (c) => {
   const slug = c.req.param("slug");
   if (!isValidSlug(slug))
     return apiError(c, "invalid_slug", "Slug must be 6–12 base62 chars.", 400);
+
+  const limited = await enforceWriteLimits(c, user.id);
+  if (limited) return limited;
 
   const drop = await getDrop(c.env.DB, slug);
   if (!drop) return apiError(c, "not_found", "No such drop.", 404);
@@ -608,6 +641,9 @@ apiRoutes.delete("/drops/:slug/v/:n", async (c) => {
   if (!isValidSlug(slug) || !Number.isFinite(n) || n < 1)
     return apiError(c, "invalid_arg", "Slug or version is malformed.", 400);
 
+  const limited = await enforceWriteLimits(c, user.id);
+  if (limited) return limited;
+
   const drop = await getDrop(c.env.DB, slug);
   if (!drop) return apiError(c, "not_found", "No such drop.", 404);
   if (drop.user_id !== user.id)
@@ -625,23 +661,24 @@ apiRoutes.delete("/drops/:slug/v/:n", async (c) => {
       409
     );
 
-  await c.env.DROPS_KV.delete(`html:${slug}:v${n}`);
-  await c.env.DB.prepare(
-    `DELETE FROM versions WHERE slug = ? AND version = ?`
-  )
-    .bind(slug, n)
-    .run();
-
+  // DB first (one batch), then KV: if the KV delete fails we leak an
+  // unreachable body rather than leave a version row pointing at nothing.
+  const stmts = [
+    c.env.DB.prepare(`DELETE FROM versions WHERE slug = ? AND version = ?`).bind(slug, n),
+  ];
   if (n === drop.latest_version) {
     const newLatest = Math.max(
       ...versions.filter((v) => v.version !== n).map((v) => v.version)
     );
-    await c.env.DB.prepare(
-      `UPDATE drops SET latest_version = ?, updated_at = ? WHERE slug = ?`
-    )
-      .bind(newLatest, Date.now(), slug)
-      .run();
+    // version_seq is left alone so n is never minted again.
+    stmts.push(
+      c.env.DB.prepare(
+        `UPDATE drops SET latest_version = ?, updated_at = ? WHERE slug = ?`
+      ).bind(newLatest, Date.now(), slug)
+    );
   }
+  await c.env.DB.batch(stmts);
+  await c.env.DROPS_KV.delete(`html:${slug}:v${n}`);
 
   const updated = await getDrop(c.env.DB, slug);
   return c.json(serializeDrop(updated!, c.env.PUBLIC_URL));
@@ -656,14 +693,18 @@ apiRoutes.delete("/drops/:slug", async (c) => {
   if (!isValidSlug(slug))
     return apiError(c, "invalid_slug", "Slug must be 6–12 base62 chars.", 400);
 
+  const limited = await enforceWriteLimits(c, user.id);
+  if (limited) return limited;
+
   const drop = await getDrop(c.env.DB, slug);
   if (!drop) return apiError(c, "not_found", "No such drop.", 404);
   if (drop.user_id !== user.id)
     return apiError(c, "forbidden", "This drop belongs to another user.", 403);
 
-  for (let v = 1; v <= drop.latest_version; v++) {
-    await c.env.DROPS_KV.delete(`html:${slug}:v${v}`);
-  }
+  // Only the versions that still exist have KV bodies (numbering can have
+  // gaps). Remove the DB rows first so the drop disappears atomically, then
+  // delete the bodies concurrently instead of one round-trip per version.
+  const versions = await listVersions(c.env.DB, slug);
   await c.env.DB.batch([
     c.env.DB.prepare(`DELETE FROM versions WHERE slug = ?`).bind(slug),
     c.env.DB.prepare(`DELETE FROM drops WHERE slug = ? AND user_id = ?`).bind(
@@ -671,6 +712,9 @@ apiRoutes.delete("/drops/:slug", async (c) => {
       user.id
     ),
   ]);
+  await Promise.all(
+    versions.map((v) => c.env.DROPS_KV.delete(`html:${slug}:v${v.version}`))
+  );
 
   return new Response(null, { status: 204 });
 });
@@ -684,6 +728,10 @@ apiRoutes.post("/drops/:slug/passcode", async (c) => {
   const slug = c.req.param("slug");
   if (!isValidSlug(slug))
     return apiError(c, "invalid_slug", "Slug must be 6–12 base62 chars.", 400);
+
+  const limited = await enforceWriteLimits(c, user.id);
+  if (limited) return limited;
+
   const drop = await getDrop(c.env.DB, slug);
   if (!drop) return apiError(c, "not_found", "No such drop.", 404);
   if (drop.user_id !== user.id)
@@ -703,13 +751,13 @@ apiRoutes.post("/drops/:slug/passcode", async (c) => {
       .bind(Date.now(), slug)
       .run();
   } else {
-    if (body.passcode.length < 4)
+    if (body.passcode.length < MIN_PASSCODE_LENGTH)
       return apiError(
         c,
         "passcode_too_short",
-        "Passcode must be at least 4 characters.",
+        `Passcode must be at least ${MIN_PASSCODE_LENGTH} characters.`,
         400,
-        { min: 4 }
+        { min: MIN_PASSCODE_LENGTH }
       );
     const { hash, salt } = await hashPassword(body.passcode);
     await c.env.DB.prepare(
@@ -855,7 +903,8 @@ type CreateBody = {
 
 type ValidationError = {
   code: "title_required" | "title_too_long" | "description_too_long"
-       | "html_required" | "html_too_large" | "context_too_large";
+       | "html_required" | "html_too_large" | "context_too_large"
+       | "passcode_too_short";
   message: string;
   details?: Record<string, unknown>;
 };
@@ -911,6 +960,16 @@ function validateCreateBody(body: {
         code: "context_too_large",
         message: `Context exceeds ${MAX_CONTEXT_BYTES} bytes.`,
         details: { max_bytes: MAX_CONTEXT_BYTES },
+      },
+      value,
+    };
+  // Same floor as POST /api/drops/:slug/passcode. Empty means "no passcode".
+  if (passcode && passcode.length < MIN_PASSCODE_LENGTH)
+    return {
+      error: {
+        code: "passcode_too_short",
+        message: `Passcode must be at least ${MIN_PASSCODE_LENGTH} characters.`,
+        details: { min: MIN_PASSCODE_LENGTH },
       },
       value,
     };

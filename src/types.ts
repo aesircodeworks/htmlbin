@@ -56,6 +56,9 @@ export type Drop = {
   password_hash: string | null;
   password_salt: string | null;
   latest_version: number;
+  // Highest version number ever minted for this drop. Never decreases, so
+  // a deleted version's number is never handed out again.
+  version_seq: number;
   view_count: number;
   // JSON-encoded Record<string,string>. Parse via parseMetadata() in drops.ts.
   metadata: string;
