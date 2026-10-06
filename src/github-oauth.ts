@@ -17,8 +17,8 @@
 //   5. Worker exchanges gh_code for an access token, fetches /user
 //   6. Lookup user by github_user_id; create one if it's the first time
 //   7. Mark the verification row verified + attach api_token; render the
-//      shared success view. The agent's poll picks up the token (one-time
-//      read, same as before).
+//      shared success view. The agent's poll claims the token (one-time
+//      read) and only then is it written to `tokens` and usable.
 //
 // Dev mock:
 //   When GITHUB_CLIENT_ID === "dev-mock", /auth/github/start skips the
@@ -29,12 +29,9 @@
 
 import { Hono } from "hono";
 import type { Bindings, Variables } from "./types";
-import {
-  hashToken,
-  newApiToken,
-  newUserId,
-} from "./crypto";
-import { createUser, getUserByGitHubId, insertToken, rateLimit } from "./db";
+import { newApiToken, newUserId } from "./crypto";
+import { createUser, getUserByGitHubId, rateLimit } from "./db";
+import { CLAIM_TTL_MS } from "./auth";
 import { verifyPage } from "./views/verify";
 
 const DEV_MOCK = "dev-mock";
@@ -242,28 +239,49 @@ githubOAuthRoutes.get("/auth/github/callback", async (c) => {
     linked = true;
   } else {
     const newId = newUserId();
-    await createUser(c.env.DB, newId, githubLogin, {
-      id: githubUserId,
-      login: githubLogin,
-    });
-    user = {
-      id: newId,
-      display_name: githubLogin,
-      created_at: Date.now(),
-      github_user_id: githubUserId,
-      github_login: githubLogin,
-    };
+    try {
+      await createUser(c.env.DB, newId, githubLogin, {
+        id: githubUserId,
+        login: githubLogin,
+      });
+      user = {
+        id: newId,
+        display_name: githubLogin,
+        created_at: Date.now(),
+        github_user_id: githubUserId,
+        github_login: githubLogin,
+      };
+    } catch (e) {
+      // A concurrent first sign-in for the same GitHub identity won the
+      // UNIQUE(github_user_id) race. Use the row it created.
+      user = await getUserByGitHubId(c.env.DB, githubUserId);
+      if (!user) throw e;
+      linked = true;
+    }
   }
 
+  // Conditional on status = 'pending' so a double-submitted callback can't
+  // overwrite the first one's token. The token is written to `tokens` only
+  // when the agent claims it in /api/auth/poll; until then it exists only
+  // here, for at most CLAIM_TTL_MS.
+  const now = Date.now();
   const apiToken = newApiToken();
-  const tokenHash = await hashToken(apiToken, c.env.TOKEN_PEPPER);
-  await insertToken(c.env.DB, tokenHash, user.id, verification.label);
-
-  await c.env.DB.prepare(
-    `UPDATE verifications SET status = 'verified', user_id = ?, api_token = ? WHERE code = ?`
+  const marked = await c.env.DB.prepare(
+    `UPDATE verifications
+        SET status = 'verified', user_id = ?, api_token = ?, expires_at = ?
+      WHERE code = ? AND status = 'pending' AND expires_at >= ?`
   )
-    .bind(user.id, apiToken, state)
+    .bind(user.id, apiToken, now + CLAIM_TTL_MS, state, now)
     .run();
+  if ((marked.meta?.changes ?? 0) === 0) {
+    return c.html(
+      verifyPage(c.env, {
+        code: state,
+        error: "This code was already used or has expired. Ask your agent to start a new flow.",
+      }),
+      409
+    );
+  }
 
   return c.html(
     verifyPage(c.env, {

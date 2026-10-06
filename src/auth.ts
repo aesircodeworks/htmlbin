@@ -1,10 +1,19 @@
 import { Hono } from "hono";
 import type { Bindings, Variables } from "./types";
 import { hashToken, newPollToken, randomHumanCode } from "./crypto";
-import { getUserByTokenHash, rateLimit, touchToken } from "./db";
+import {
+  getUserByTokenHash,
+  insertToken,
+  rateLimit,
+  sweepExpiredAuthState,
+  touchToken,
+} from "./db";
 import { apiError } from "./errors";
 
 const VERIFY_TTL_MS = 10 * 60 * 1000; // 10 minutes
+// After the human signs in, the agent gets this long to poll and claim the
+// token. Past it the plaintext is wiped and the token never becomes valid.
+export const CLAIM_TTL_MS = 10 * 60 * 1000;
 const POLL_MIN_INTERVAL_S = 2;
 
 export const authRoutes = new Hono<{
@@ -49,6 +58,10 @@ authRoutes.post("/auth/start", async (c) => {
     .bind(code, pollToken, label, now, expiresAt)
     .run();
 
+  // Opportunistic cleanup: wipe unclaimed plaintext tokens past their claim
+  // window and drop stale rate-limit buckets. Off the hot path.
+  c.executionCtx.waitUntil(sweepExpiredAuthState(c.env.DB));
+
   const verifyUrl = `${c.env.PUBLIC_URL}/verify?code=${encodeURIComponent(code)}`;
 
   // Response is structured-data-only. The human-handoff guidance lives in
@@ -86,13 +99,14 @@ authRoutes.get("/auth/poll", async (c) => {
   }
 
   const row = await c.env.DB.prepare(
-    `SELECT code, status, user_id, api_token, expires_at
+    `SELECT code, status, label, user_id, api_token, expires_at
        FROM verifications WHERE poll_token = ?`
   )
     .bind(token)
     .first<{
       code: string;
       status: string;
+      label: string | null;
       user_id: string | null;
       api_token: string | null;
       expires_at: number;
@@ -101,22 +115,36 @@ authRoutes.get("/auth/poll", async (c) => {
   if (!row)
     return apiError(c, "not_found", "Poll token not recognized.", 404);
 
-  if (row.status === "pending" && row.expires_at < Date.now()) {
+  // Pending past the verify TTL, or verified but not claimed within the
+  // claim window: wipe any plaintext token and expire the row.
+  if (
+    (row.status === "pending" || row.status === "verified") &&
+    row.expires_at < Date.now()
+  ) {
     await c.env.DB.prepare(
-      `UPDATE verifications SET status = 'expired' WHERE poll_token = ?`
+      `UPDATE verifications SET status = 'expired', api_token = NULL
+        WHERE poll_token = ? AND status IN ('pending', 'verified')`
     )
       .bind(token)
       .run();
     return c.json({ status: "expired" });
   }
 
-  if (row.status === "verified" && row.api_token) {
-    // One-time read: clear the token and mark claimed.
-    await c.env.DB.prepare(
-      `UPDATE verifications SET api_token = NULL, status = 'claimed' WHERE poll_token = ?`
+  if (row.status === "verified" && row.api_token && row.user_id) {
+    // One-time read. The conditional UPDATE is the claim: if two polls race,
+    // only the one that flips the row gets the token. The token only becomes
+    // valid (lands in `tokens`) once claimed, so an unclaimed one can't be
+    // used even if it leaks from the verifications row.
+    const claim = await c.env.DB.prepare(
+      `UPDATE verifications SET api_token = NULL, status = 'claimed'
+        WHERE poll_token = ? AND status = 'verified' AND api_token IS NOT NULL`
     )
       .bind(token)
       .run();
+    if ((claim.meta?.changes ?? 0) === 0) return c.json({ status: "claimed" });
+
+    const tokenHash = await hashToken(row.api_token, c.env.TOKEN_PEPPER);
+    await insertToken(c.env.DB, tokenHash, row.user_id, row.label);
     return c.json({
       status: "verified",
       api_token: row.api_token,

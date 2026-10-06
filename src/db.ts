@@ -244,4 +244,26 @@ export async function rateLimit(
   return { ok: true, retryAfter: 0 };
 }
 
+// Housekeeping for the auth tables, run off the hot path from
+// /api/auth/start:
+//   - expire verifications past their deadline and wipe any unclaimed
+//     plaintext api_token (verified rows get a fresh claim deadline);
+//   - delete verification rows a day past expiry;
+//   - delete rate-limit buckets whose window is long gone (the longest
+//     window in use is one day).
+export async function sweepExpiredAuthState(db: D1Database): Promise<void> {
+  const now = Date.now();
+  const DAY = 86_400_000;
+  await db.batch([
+    db
+      .prepare(
+        `UPDATE verifications SET status = 'expired', api_token = NULL
+          WHERE expires_at < ? AND status IN ('pending', 'verified')`
+      )
+      .bind(now),
+    db.prepare(`DELETE FROM verifications WHERE expires_at < ?`).bind(now - DAY),
+    db.prepare(`DELETE FROM rate_limits WHERE window_start < ?`).bind(now - 2 * DAY),
+  ]);
+}
+
 export type Env = Bindings;
