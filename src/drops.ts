@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import type { Bindings, Drop, Variables } from "./types";
+import type { Bindings, Drop, Variables, Visibility } from "./types";
 import { authMiddleware } from "./auth";
 import { generateSlug, isValidSlug } from "./slug";
 import { hashPassword } from "./crypto";
@@ -237,12 +237,13 @@ apiRoutes.post("/drops", async (c) => {
         passcode?: string;
         context?: string;
         metadata?: unknown;
+        visibility?: string;
       }
     | null;
   if (!body) return apiError(c, "invalid_json", "Request body must be JSON.", 400);
 
   const badTypes = nonStringFields(body as Record<string, unknown>, [
-    "title", "description", "html", "passcode", "context",
+    "title", "description", "html", "passcode", "context", "visibility",
   ]);
   if (badTypes.length > 0)
     return apiError(
@@ -264,6 +265,10 @@ apiRoutes.post("/drops", async (c) => {
     if (!m.ok) return apiError(c, "invalid_arg", m.message, 400, m.details);
     metadataRaw = m.raw;
   }
+
+  const visibility = parseVisibility(body.visibility) ?? "public";
+  if (body.visibility !== undefined && !parseVisibility(body.visibility))
+    return apiError(c, "invalid_arg", VISIBILITY_MESSAGE, 400, { field: "visibility" });
 
   const { title, description, html, passcode, context } = valid.value;
 
@@ -309,11 +314,12 @@ apiRoutes.post("/drops", async (c) => {
     c.env.DB.prepare(
       `INSERT INTO drops
          (slug, user_id, title, description, password_hash, password_salt,
-          latest_version, version_seq, view_count, metadata, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 1, 1, 0, ?, ?, ?)`
+          latest_version, version_seq, view_count, metadata, visibility,
+          created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 1, 1, 0, ?, ?, ?, ?)`
     ).bind(
       slug, user.id, title, description, passcodeHash, passcodeSalt,
-      metadataRaw, now, now
+      metadataRaw, visibility, now, now
     ),
     c.env.DB.prepare(
       `INSERT INTO versions (slug, version, size_bytes, context, created_at)
@@ -321,7 +327,7 @@ apiRoutes.post("/drops", async (c) => {
     ).bind(slug, sizeBytes, context || null, now),
   ]);
 
-  if (!passcodeHash) await invalidateRecentDrops(c.env);
+  if (!passcodeHash && visibility === "public") await invalidateRecentDrops(c.env);
 
   const created = await getDrop(c.env.DB, slug);
   return c.json(serializeDrop(created!, c.env.PUBLIC_URL), 201);
@@ -363,12 +369,13 @@ apiRoutes.put("/drops/:slug", async (c) => {
         html?: string;
         context?: string;
         metadata?: unknown;
+        visibility?: string;
       }
     | null;
   if (!body) return apiError(c, "invalid_json", "Request body must be JSON.", 400);
 
   const badTypes = nonStringFields(body as Record<string, unknown>, [
-    "title", "description", "html", "context",
+    "title", "description", "html", "context", "visibility",
   ]);
   if (badTypes.length > 0)
     return apiError(
@@ -396,6 +403,10 @@ apiRoutes.put("/drops/:slug", async (c) => {
     if (!m.ok) return apiError(c, "invalid_arg", m.message, 400, m.details);
     metadataRaw = m.raw;
   }
+
+  const visibility = parseVisibility(body.visibility);
+  if (body.visibility !== undefined && !visibility)
+    return apiError(c, "invalid_arg", VISIBILITY_MESSAGE, 400, { field: "visibility" });
 
   const sizeBytes = byteLength(body.html);
   if (sizeBytes > MAX_HTML_BYTES)
@@ -462,15 +473,17 @@ apiRoutes.put("/drops/:slug", async (c) => {
           SET title = COALESCE(?, title),
               description = COALESCE(?, description),
               metadata = COALESCE(?, metadata),
+              visibility = COALESCE(?, visibility),
               latest_version = ?,
               updated_at = ?
         WHERE slug = ? AND user_id = ?`
     ).bind(
-      title ?? null, description ?? null, metadataRaw,
+      title ?? null, description ?? null, metadataRaw, visibility ?? null,
       nextVersion, now, slug, user.id
     ),
   ]);
-  if (title !== undefined) await invalidateRecentDrops(c.env);
+  if (title !== undefined || (visibility && visibility !== drop.visibility))
+    await invalidateRecentDrops(c.env);
 
   const updated = await getDrop(c.env.DB, slug);
   return c.json(serializeDrop(updated!, c.env.PUBLIC_URL));
@@ -499,12 +512,13 @@ apiRoutes.patch("/drops/:slug", async (c) => {
         description?: string;
         html?: string;
         metadata?: unknown;
+        visibility?: string;
       }
     | null;
   if (!body) return apiError(c, "invalid_json", "Request body must be JSON.", 400);
 
   const badTypes = nonStringFields(body as Record<string, unknown>, [
-    "title", "description", "html",
+    "title", "description", "html", "visibility",
   ]);
   if (badTypes.length > 0)
     return apiError(
@@ -548,20 +562,26 @@ apiRoutes.patch("/drops/:slug", async (c) => {
     metadataRaw = m.raw;
   }
 
+  const visibility = parseVisibility(body.visibility);
+  if (body.visibility !== undefined && !visibility)
+    return apiError(c, "invalid_arg", VISIBILITY_MESSAGE, 400, { field: "visibility" });
+
   await c.env.DB.prepare(
     `UPDATE drops
         SET title = COALESCE(?, title),
             description = COALESCE(?, description),
             metadata = COALESCE(?, metadata),
+            visibility = COALESCE(?, visibility),
             updated_at = ?
       WHERE slug = ? AND user_id = ?`
   )
     .bind(
-      title ?? null, description ?? null, metadataRaw,
+      title ?? null, description ?? null, metadataRaw, visibility ?? null,
       Date.now(), slug, user.id
     )
     .run();
-  if (title !== undefined) await invalidateRecentDrops(c.env);
+  if (title !== undefined || (visibility && visibility !== drop.visibility))
+    await invalidateRecentDrops(c.env);
 
   const updated = await getDrop(c.env.DB, slug);
   return c.json(serializeDrop(updated!, c.env.PUBLIC_URL));
@@ -807,6 +827,8 @@ function serializeDrop(d: Drop, publicUrl: string) {
     url: `${publicUrl}/p/${d.slug}`,
     raw_url: `${publicUrl}/p/${d.slug}/raw`,
     locked: !!d.password_hash,
+    // Rows written before migration 0005 have no column; they're public.
+    visibility: d.visibility ?? "public",
     latest_version: d.latest_version,
     view_count: d.view_count,
     // Always present, default {}. Stripe-style: never omit, never undefined.
@@ -814,6 +836,13 @@ function serializeDrop(d: Drop, publicUrl: string) {
     created_at: d.created_at,
     updated_at: d.updated_at,
   };
+}
+
+// `visibility` on POST/PUT/PATCH. Absent → default (POST) or untouched
+// (PUT/PATCH). Anything but the two literal values is rejected.
+const VISIBILITY_MESSAGE = '`visibility` must be "public" or "private".';
+function parseVisibility(v: unknown): Visibility | undefined {
+  return v === "public" || v === "private" ? v : undefined;
 }
 
 // Parse the JSON TEXT column into the public Record<string,string> shape.

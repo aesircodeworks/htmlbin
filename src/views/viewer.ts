@@ -19,6 +19,8 @@ export function viewerPage(
     versions: VersionItem[];
     viewVersion: number;
     authorLogin: string | null;
+    // Owner viewing their own private drop.
+    isPrivate?: boolean;
   }
 ): string {
   const title = escapeHtml(drop.title);
@@ -217,6 +219,7 @@ ${
   <div class="title">${title}</div>
   ${description ? `<span class="sep desc-sep">·</span><div class="desc">${description}</div>` : ""}
   <div class="right">
+    ${state.isPrivate ? `<form method="POST" action="/auth/signout" class="lock-form"><input type="hidden" name="slug" value="${slug}" /><button type="submit" class="lock-pill" aria-label="sign out of this private drop"><span class="lock-state">private</span><span class="lock-action">sign out</span></button></form>` : ""}
     ${state.locked ? `<form method="POST" action="/p/${slug}/lock" class="lock-form"><button type="submit" class="lock-pill" aria-label="re-lock this drop"><span class="lock-state">unlocked</span><span class="lock-action">lock</span></button></form>` : ""}
     <span>${updated}</span>
     <button class="vchip ${isLatest ? "latest" : ""}" id="vchip" aria-haspopup="true">
@@ -372,6 +375,59 @@ ${pageHead({ verb: "GET", path: `/p/${slug}` })}
   });
 })();
 </script>
+</body>
+</html>`;
+}
+
+// Gate for a private drop. Shows nothing about the drop (no title, no
+// description, no author): only the owner, signed in with GitHub, learns
+// what it is.
+export function privateGatePage(
+  env: Bindings,
+  slugRaw: string,
+  state: { signedIn: boolean; signedInAs: string | null }
+): string {
+  const slug = escapeHtml(slugRaw);
+  const who = state.signedInAs ? `@${escapeHtml(state.signedInAs)}` : "this account";
+  return /* html */ `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>private drop · htmlbin</title>
+<meta name="robots" content="noindex" />
+<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+${STYLE_INLINE}
+<script src="/sentry.js" defer></script>
+<link rel="preload" as="font" type="font/woff2" href="/fonts/Geist-700.woff2" crossorigin="anonymous" />
+<link rel="preload" as="font" type="font/woff2" href="/fonts/GeistMono-500.woff2" crossorigin="anonymous" />
+</head>
+<body>
+${pageHead({ verb: "GET", path: `/p/${slug}` })}
+<main>
+  ${httpMemo({
+    verb: "GET",
+    path: `/p/${slug}`,
+    rows: [{ k: "re", v: "private drop", em: true }],
+    res: state.signedIn
+      ? { status: "403 Forbidden", ok: false, trailing: "owner-only" }
+      : { status: "401 Unauthorized", ok: false, trailing: "www-authenticate: github" },
+  })}
+  <section class="gate">
+    <h2 class="gate-title">Private drop</h2>
+    <p class="gate-sub">owner only</p>
+    ${
+      state.signedIn
+        ? /* html */ `<p class="gate-error">${who} doesn't own this drop</p>
+    <form method="POST" action="/auth/signout" class="gate-form">
+      <input type="hidden" name="slug" value="${slug}" />
+      <button type="submit" class="gate-submit">sign out</button>
+    </form>`
+        : /* html */ `<a href="/auth/github/owner?slug=${slug}" class="gate-submit">sign in with GitHub</a>`
+    }
+    <p class="gate-fine">only the GitHub account that published it can view this</p>
+  </section>
+</main>
 </body>
 </html>`;
 }

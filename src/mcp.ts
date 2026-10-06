@@ -59,6 +59,13 @@ const METADATA = {
   description: "Flat string-to-string tag bag. At most 10 keys.",
 };
 
+const VISIBILITY = {
+  type: "string",
+  enum: ["public", "private"],
+  description:
+    "public (default): anyone with the URL can view. private: only the owner, signed in with GitHub on the viewer, can view.",
+};
+
 const TOOLS: ToolSpec[] = [
   {
     name: "whoami",
@@ -80,6 +87,7 @@ const TOOLS: ToolSpec[] = [
         passcode: { ...STRING, description: "Optional share gate. At least 4 characters." },
         context: { ...STRING, description: "Optional reasoning trace. At most 64 KB. Include only with the human's agreement." },
         metadata: METADATA,
+        visibility: VISIBILITY,
       },
     },
   },
@@ -124,13 +132,14 @@ const TOOLS: ToolSpec[] = [
         description: STRING,
         context: STRING,
         metadata: METADATA,
+        visibility: VISIBILITY,
       },
     },
   },
   {
     name: "patch_drop",
     description:
-      "Change title, description, or metadata without minting a version. Do not send html.",
+      "Change title, description, metadata, or visibility without minting a version. Do not send html.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -140,6 +149,7 @@ const TOOLS: ToolSpec[] = [
         title: STRING,
         description: STRING,
         metadata: METADATA,
+        visibility: VISIBILITY,
       },
     },
   },
@@ -378,7 +388,7 @@ async function callTool(
     case "create_drop":
       path = "/api/drops";
       method = "POST";
-      body = pick(args, ["title", "html", "description", "passcode", "context", "metadata"]);
+      body = pick(args, ["title", "html", "description", "passcode", "context", "metadata", "visibility"]);
       break;
     case "get_drop":
       path = `/api/drops/${encodeURIComponent(String(args.slug))}`;
@@ -390,12 +400,12 @@ async function callTool(
     case "update_drop":
       path = `/api/drops/${encodeURIComponent(String(args.slug))}`;
       method = "PUT";
-      body = pick(args, ["html", "title", "description", "context", "metadata"]);
+      body = pick(args, ["html", "title", "description", "context", "metadata", "visibility"]);
       break;
     case "patch_drop":
       path = `/api/drops/${encodeURIComponent(String(args.slug))}`;
       method = "PATCH";
-      body = pick(args, ["title", "description", "metadata"]);
+      body = pick(args, ["title", "description", "metadata", "visibility"]);
       break;
     case "delete_drop":
       path = `/api/drops/${encodeURIComponent(String(args.slug))}`;

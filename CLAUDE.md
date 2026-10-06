@@ -56,6 +56,12 @@ them ships something the user will reject:
    account page. Sign-in happens once at `/verify` and the agent flow
    is unchanged from its side. Do not extend this exception to add a
    user-facing account UI.
+   *Second documented exception (Oct 2026, user-approved):* a private
+   drop's gate on `/p/:slug` offers "sign in with GitHub" so its owner
+   can view it (see "Private drops" below). It only answers "is this
+   browser the drop's owner?" — it never creates an account, never
+   mints a token, and has no page of its own. Same rule: don't grow it
+   into an account UI.
 5. **Don't introduce a new keyword (formerly "HTMD").** The product is
    called htmlbin; the artifact is "a drop"; "drop" is just casual
    English, not a coined term we own. We do not have authority to define
@@ -400,6 +406,40 @@ per IP per drop (passcodes can be 4 chars).
 Gate page uses `<input type="text">` + CSS `-webkit-text-security: disc` so
 the value masks like a password field but autofill doesn't fire. A tiny
 inline script flips text-security on a "show/hide" toggle.
+
+## Private drops (owner-only, GitHub sign-in)
+
+`drops.visibility` (migration 0005) is `'public'` (default) or
+`'private'`. Set via `visibility` on POST / PUT / PATCH (and the MCP
+`create_drop` / `update_drop` / `patch_drop` tools); returned on every
+Drop. A private drop is viewable only by its owner:
+
+- `/p/:slug` shows a gate with **no title, description or author**
+  (401 signed out, 403 signed in as someone else). Owner sees the
+  normal viewer, skips any passcode, and gets a "private · sign out"
+  pill. `/raw` redirects non-owners to the gate; `/og.png` / `/og.svg`
+  redirect to the site card. All private responses are `no-store`.
+- Never in the homepage feed (`listRecentPublicDrops` filters it;
+  changing visibility calls `invalidateRecentDrops()`).
+- **Owner session:** `GET /auth/github/owner?slug=` → GitHub → the
+  *same* `/auth/github/callback` (one OAuth app, one registered URL).
+  The state is `o_<random>` (verify codes never contain `_`) and is
+  double-checked against an HttpOnly `hb_owner_oauth` cookie
+  (Path=/auth/github, 10 min) to stop login CSRF. The callback only
+  *looks up* the user by `github_user_id` — no account creation, no
+  token. It sets `hb_owner` = `user_id.exp.hmac` (`signOwnerToken` in
+  `src/crypto.ts`, MAC domain-separated with `owner|`), **Path=/p**,
+  HttpOnly, Secure, SameSite=Lax, 7 days. `POST /auth/signout` clears it.
+  Logic lives in `src/owner-session.ts`.
+- Path=/p keeps the cookie off `/api/*` and `/mcp` (bearer only).
+  SameSite=Lax plus the sandboxed opaque origin on `/raw` means a
+  script in someone else's drop can't fetch your private `/raw`.
+- Like the passcode, it's access control on the viewer, not
+  encryption: the HTML sits in KV like any other drop.
+- Switching a drop to private doesn't recall copies a browser already
+  cached (`max-age=60` on public pages).
+- **Migration 0005 must be applied to production D1 before merging**
+  (and before testing on a PR preview, which shares it).
 
 ## Context metadata
 
@@ -906,7 +946,8 @@ URLs work without any DSN.
 src/
   index.ts          ─ Hono routes (/, /verify, /p/:slug, +discoverability)
   auth.ts           ─ device-code flow + Bearer middleware
-  github-oauth.ts   ─ /auth/github/start + /auth/github/callback
+  github-oauth.ts   ─ /auth/github/start + /callback, /auth/github/owner, /auth/signout
+  owner-session.ts  ─ hb_owner cookie for private drops (owner-only viewing)
   drops.ts          ─ /api/drops CRUD with versioning + context
   mcp.ts            ─ POST /mcp, Streamable HTTP, same hb_ bearer token
   onboard.ts        ─ /api/onboard JSON descriptor + markdown walkthrough

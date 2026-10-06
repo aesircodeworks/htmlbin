@@ -17,6 +17,7 @@ Use this skill when the user asks to:
 - Update title or description without re-uploading HTML
 - List previously published drops or look up a specific drop
 - Set or change a passcode on a drop
+- Make a drop private (only the owner can view it)
 - Delete a single version or the whole drop
 - Authorize a new machine against an existing identity
 
@@ -172,6 +173,7 @@ Returns the full Drop (HTTP 201):
   "url": "https://htmlbin.aesir.works/p/aB3xK7gPq",
   "raw_url": "https://htmlbin.aesir.works/p/aB3xK7gPq/raw",
   "locked": false,
+  "visibility": "public",
   "latest_version": 1,
   "view_count": 0,
   "metadata": {},
@@ -260,6 +262,22 @@ curl -s -X POST "https://htmlbin.aesir.works/api/drops/<slug>/passcode" \
 Pass `"passcode": ""` to remove. Returns the full updated Drop. The
 passcode is a soft share gate, not encryption.
 
+### Make a drop private
+
+```bash
+curl -s -X PATCH "https://htmlbin.aesir.works/api/drops/<slug>" \
+  -H "Authorization: Bearer $(cat .htmlbin/token)" \
+  -H "Content-Type: application/json" \
+  -d '{ "visibility": "private" }'
+```
+
+A private drop is viewable only by its owner: `/p/<slug>` asks for a
+GitHub sign-in and shows the drop only to the GitHub account that
+published it. Everyone else sees a gate with no title. Private drops
+never appear in the homepage feed. `"visibility"` is also accepted on
+create and on PUT; send `"public"` to undo. Use this when the human
+wants the page for themselves, and a passcode when they want to share it.
+
 ### Delete a single version
 
 ```bash
@@ -296,6 +314,8 @@ Returns `user_id`, `created_at`, `drop_count`, and the calling token's
   on the per-drop OG card
 - `description` (string, ≤500 chars) — subtitle in viewer chrome
 - `passcode` (string, ≥4 chars) — soft share gate, shown on `/p/<slug>` before the body
+- `visibility` (`"public"` default, or `"private"`) — private drops are
+  viewable only by the owner, signed in with GitHub on `/p/<slug>`
 - `context` (string, ≤64 KB) — the reasoning trace, prompt, or thinking
   that produced this version. **Opt-in only**: include only after the
   human has explicitly agreed, since it can include prompt content from

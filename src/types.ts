@@ -48,6 +48,8 @@ export type User = {
   github_login: string | null;
 };
 
+export type Visibility = "public" | "private";
+
 export type Drop = {
   slug: string;
   user_id: string;
@@ -62,6 +64,8 @@ export type Drop = {
   view_count: number;
   // JSON-encoded Record<string,string>. Parse via parseMetadata() in drops.ts.
   metadata: string;
+  // 'public' | 'private'. Private = owner-only, gated by GitHub sign-in.
+  visibility: Visibility;
   created_at: number;
   updated_at: number;
 };

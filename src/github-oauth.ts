@@ -30,12 +30,28 @@
 import { Hono } from "hono";
 import * as Sentry from "@sentry/cloudflare";
 import type { Bindings, Variables } from "./types";
-import { newApiToken, newUserId } from "./crypto";
+import { newApiToken, newUserId, randomBase62 } from "./crypto";
 import { createUser, getUserByGitHubId, rateLimit } from "./db";
 import { CLAIM_TTL_MS } from "./auth";
 import { verifyPage } from "./views/verify";
+import { isValidSlug } from "./slug";
+import {
+  clearOwnerSessionCookie,
+  getCookie,
+  ownerSessionCookie,
+} from "./owner-session";
 
 const DEV_MOCK = "dev-mock";
+
+// Owner sign-in for private drops shares /auth/github/callback with the
+// device-code flow (one OAuth app, one registered callback URL). Its state
+// is `o_<random>`; verify codes never contain "_", so the prefix can't
+// collide. The state is also held in a short-lived HttpOnly cookie, which
+// the callback compares against, so a sign-in can't be started in one
+// browser and finished in another (login CSRF).
+const OWNER_STATE_PREFIX = "o_";
+const OWNER_OAUTH_COOKIE = "hb_owner_oauth";
+const OWNER_OAUTH_TTL_S = 600;
 
 export const githubOAuthRoutes = new Hono<{
   Bindings: Bindings;
@@ -112,7 +128,9 @@ githubOAuthRoutes.get("/auth/github/start", async (c) => {
 // Callback: exchange the gh code, look up / create the user, mint the
 // api token, mark verification verified.
 githubOAuthRoutes.get("/auth/github/callback", async (c) => {
-  const state = (c.req.query("state") ?? "").trim().toUpperCase();
+  const rawState = (c.req.query("state") ?? "").trim();
+  if (rawState.startsWith(OWNER_STATE_PREFIX)) return ownerCallback(c, rawState);
+  const state = rawState.toUpperCase();
   const ghCode = c.req.query("code") ?? "";
   const ghError = c.req.query("error");
 
@@ -309,6 +327,118 @@ githubOAuthRoutes.get("/auth/github/callback", async (c) => {
       githubLogin,
     })
   );
+});
+
+// ---------------------------------------------------------------------------
+// Owner sign-in for private drops.
+//
+// GET /auth/github/owner?slug=<slug> → GitHub → /auth/github/callback →
+// hb_owner cookie → back to /p/<slug>. Only *identifies* an existing
+// htmlbin account by github_user_id; it never creates one and never mints
+// a token. Whether the account owns the drop is decided on the viewer.
+
+githubOAuthRoutes.get("/auth/github/owner", async (c) => {
+  const slug = c.req.query("slug") ?? "";
+  if (!isValidSlug(slug)) return c.redirect("/", 302);
+
+  const state = `${OWNER_STATE_PREFIX}${randomBase62(32)}`;
+  const stateCookie = `${OWNER_OAUTH_COOKIE}=${state}.${slug}; Path=/auth/github; HttpOnly; Secure; SameSite=Lax; Max-Age=${OWNER_OAUTH_TTL_S}`;
+
+  let location: string;
+  if (c.env.GITHUB_CLIENT_ID === DEV_MOCK) {
+    const cbUrl = new URL(`${c.env.PUBLIC_URL}/auth/github/callback`);
+    cbUrl.searchParams.set("state", state);
+    cbUrl.searchParams.set("code", "mock");
+    cbUrl.searchParams.set("mock_login", (c.req.query("mock_login") ?? "dev-user").slice(0, 40));
+    location = cbUrl.toString();
+  } else {
+    const authorize = new URL("https://github.com/login/oauth/authorize");
+    authorize.searchParams.set("client_id", c.env.GITHUB_CLIENT_ID);
+    authorize.searchParams.set("redirect_uri", `${c.env.PUBLIC_URL}/auth/github/callback`);
+    authorize.searchParams.set("scope", "read:user");
+    authorize.searchParams.set("state", state);
+    // Signing in can only find an existing account, so don't offer signup.
+    authorize.searchParams.set("allow_signup", "false");
+    location = authorize.toString();
+  }
+  return new Response(null, {
+    status: 302,
+    headers: { Location: location, "Set-Cookie": stateCookie },
+  });
+});
+
+async function ownerCallback(c: any, state: string): Promise<Response> {
+  const pending = getCookie(c.req.header("Cookie") ?? "", OWNER_OAUTH_COOKIE);
+  const dot = pending ? pending.indexOf(".") : -1;
+  const cookieState = dot > 0 ? pending!.slice(0, dot) : "";
+  const slug = dot > 0 ? pending!.slice(dot + 1) : "";
+  const clearState = `${OWNER_OAUTH_COOKIE}=; Path=/auth/github; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
+  const back = (cookies: string[]) => {
+    const headers = new Headers({ Location: isValidSlug(slug) ? `/p/${slug}` : "/" });
+    for (const ck of cookies) headers.append("Set-Cookie", ck);
+    return new Response(null, { status: 302, headers });
+  };
+
+  // Missing or mismatched state cookie: not a sign-in this browser started.
+  if (!cookieState || cookieState !== state || !isValidSlug(slug)) {
+    return back([clearState]);
+  }
+  const ghCode = c.req.query("code") ?? "";
+  if (c.req.query("error") || !ghCode) return back([clearState]);
+
+  const ip = c.req.header("CF-Connecting-IP") ?? "unknown";
+  const rl = await rateLimit(c.env.DB, `gh:cb:${ip}`, 20, 60_000);
+  if (!rl.ok) return back([clearState]);
+
+  let githubUserId: number;
+  try {
+    if (c.env.GITHUB_CLIENT_ID === DEV_MOCK) {
+      githubUserId = await stableMockId((c.req.query("mock_login") ?? "dev-user").slice(0, 40));
+    } else {
+      const exchanged = await exchangeCode(
+        ghCode,
+        c.env.GITHUB_CLIENT_ID,
+        c.env.GITHUB_CLIENT_SECRET,
+        `${c.env.PUBLIC_URL}/auth/github/callback`
+      );
+      githubUserId = (await fetchGitHubUser(exchanged.access_token)).id;
+    }
+  } catch (e) {
+    console.error("github_owner_oauth_failed", String(e));
+    const ghCodeRejected =
+      e instanceof GitHubOAuthError && e.githubError === "bad_verification_code";
+    if (!ghCodeRejected) {
+      Sentry.captureException(e, {
+        tags: {
+          github_oauth_error:
+            e instanceof GitHubOAuthError ? e.githubError : "network",
+          github_oauth_flow: "owner",
+        },
+      });
+    }
+    return back([clearState]);
+  }
+
+  // No htmlbin account for this GitHub identity: it owns nothing. Drop any
+  // older session so the gate doesn't claim a different login.
+  const user = await getUserByGitHubId(c.env.DB, githubUserId);
+  if (!user) return back([clearState, clearOwnerSessionCookie()]);
+
+  return back([clearState, await ownerSessionCookie(user.id, c.env.TOKEN_PEPPER)]);
+}
+
+// Sign out of the owner session. POST so a link preview can't do it; no
+// CSRF token because the only effect is on the caller's own cookie.
+githubOAuthRoutes.post("/auth/signout", async (c) => {
+  const form = await c.req.formData().catch(() => null);
+  const slug = String(form?.get("slug") ?? "");
+  return new Response(null, {
+    status: 302,
+    headers: {
+      Location: isValidSlug(slug) ? `/p/${slug}` : "/",
+      "Set-Cookie": clearOwnerSessionCookie(),
+    },
+  });
 });
 
 // ---------------------------------------------------------------------------

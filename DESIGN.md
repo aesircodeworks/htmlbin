@@ -15,7 +15,7 @@ systems, on purpose, and they are not interchangeable:
 | | **Landing** (`/`) | **App chrome** (everything else) |
 |---|---|---|
 | Job | convince a stranger in ten seconds | get out of the way of the work |
-| Pages | `/` only | `/verify`, `/p/:slug`, the passcode gate, `/404` |
+| Pages | `/` only | `/verify`, `/p/:slug`, the passcode and private gates, `/404` |
 | Surface | `--page` `#F4F5F6` + dot texture | pure white |
 | Layout | centred, 1080px shell | left-aligned, 720px single column |
 | Header | real nav + one solid button (`.lnav`) | mono breadcrumb (`.page-head`) |
