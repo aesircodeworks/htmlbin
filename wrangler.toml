@@ -2,7 +2,6 @@ name = "htmlbin"
 main = "src/index.ts"
 compatibility_date = "2025-04-01"
 compatibility_flags = ["nodejs_compat"]
-account_id = "8a9eb8a6efdca98aa450343a55b484cc"
 
 # Each `wrangler versions upload` returns a workers.dev preview URL we
 # can post on PRs. Production traffic still goes through the custom
@@ -35,12 +34,12 @@ GITHUB_CLIENT_ID = "Ov23li6nAqCYrRIN3WSf"
 
 [[kv_namespaces]]
 binding = "DROPS_KV"
-id = "915440d1cdfb4876bb3b8c721a694873"
+id = "0f8b94225614433097ed0481e78c6aff"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "htmlbin-db"
-database_id = "63632af3-b786-422b-87bd-bf6e13399ec9"
+database_id = "804d45ca-da4f-4bb0-9b7f-f4cdc55c99e6"
 # Pointing wrangler at this directory lets `wrangler d1 migrations apply`
 # auto-discover migration files and track which have run via a
 # `d1_migrations` table. Replaces the hardcoded-per-file npm scripts.
