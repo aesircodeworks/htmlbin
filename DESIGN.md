@@ -441,7 +441,7 @@ Vertical order, top to bottom. Everything is centred.
      /p/q9mN2vJxx Why DNS feels slow                    1h
 
    ───────────────────────────────────────────────────────────────────
-   — htmlbin                      agent-card · /api/onboard · @utsengar
+   — htmlbin                      agent-card · /api/onboard · github
 ```
 
 **Section rhythm:** `.lsec` carries 92px top padding. The evidence block

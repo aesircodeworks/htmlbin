@@ -94,7 +94,7 @@ ${STYLE_INLINE}
       <a href="/.well-known/patterns/index.json">Patterns</a>
     </div>
     <div class="right">
-      <a class="gh" href="https://github.com/utsengar/htmlbin" target="_blank" rel="noopener noreferrer">
+      <a class="gh" href="https://github.com/aesircodeworks/htmlbin" target="_blank" rel="noopener noreferrer">
         <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="${GITHUB_MARK}"/></svg><span>GitHub</span>
       </a>
       <a class="btn" href="/api/onboard">Read the protocol</a>
@@ -225,7 +225,7 @@ ${recentSection(recentDrops)}
       <span class="sep">·</span>
       <a href="/api/onboard">/api/onboard</a>
       <span class="sep">·</span>
-      <a href="https://x.com/utsengar" target="_blank" rel="noopener noreferrer">@utsengar</a>
+      <a href="https://github.com/aesircodeworks/htmlbin" target="_blank" rel="noopener noreferrer">github</a>
     </span>
   </div>
 </main>

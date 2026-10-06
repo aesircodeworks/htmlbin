@@ -11,9 +11,8 @@ does a one-time human-verified device-code dance, then publishes
 self-contained HTML to a public URL. No human after auth. Live at
 **htmlbin.aesir.works**.
 
-Public reinvention of an internal Webflow tool ("wrop"). The Webflow
-codebase lives at `/Users/utkarshsengar/dev/prototypes/Prototypes` for
-reference only — none of it ships in the public version.
+Public reinvention of an internal Webflow tool ("wrop"). None of that
+codebase ships in the public version.
 
 Agents call the HTTP API or `POST /mcp`. Both doors take the same
 `Authorization: Bearer hb_…` token. GitHub happens once, at `/verify`,

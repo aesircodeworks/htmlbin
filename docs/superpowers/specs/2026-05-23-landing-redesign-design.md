@@ -83,7 +83,7 @@ The `EXAMPLES` array in `src/views/landing.ts` carries a `kind` field per item.
 One mono strip. Do not repeat the public host in the footer; the address bar already shows it.
 
 ```
-— htmlbin             agent-card · /api/onboard · @utsengar
+— htmlbin             agent-card · /api/onboard · github
 ```
 
 ## Out of scope
