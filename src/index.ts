@@ -34,6 +34,7 @@ import {
   getDrop,
   getDropWithAuthor,
   listVersions,
+  rateLimit,
 } from "./db";
 import { isValidSlug } from "./slug";
 import { apiError } from "./errors";
@@ -176,12 +177,10 @@ async function landingAsMarkdown(c: any): Promise<Response> {
     ]);
     markdown = results?.[0]?.data ?? "";
   } catch (e) {
-    return c.json(
-      {
-        error: "markdown_unavailable",
-        detail:
-          "Markdown conversion requires Workers AI. Available in production; in `wrangler dev` use --remote.",
-      },
+    return apiError(
+      c,
+      "markdown_unavailable",
+      "Markdown conversion requires Workers AI. Available in production; in `wrangler dev` use --remote.",
       503
     );
   }
@@ -605,7 +604,12 @@ app.on(["GET", "HEAD"], "/p/:slug", async (c) => {
   if (locked) {
     const cookie = getCookie(c.req.header("Cookie") ?? "", `wu_${slug}`);
     if (cookie) {
-      unlocked = await verifyUnlockToken(cookie, slug, c.env.TOKEN_PEPPER);
+      unlocked = await verifyUnlockToken(
+        cookie,
+        slug,
+        c.env.TOKEN_PEPPER,
+        drop.password_hash!
+      );
     }
   }
 
@@ -665,8 +669,21 @@ app.post("/p/:slug/unlock", async (c) => {
     return c.redirect(`/p/${slug}`, 302);
   }
 
-  const form = await c.req.formData();
-  const passcode = String(form.get("passcode") ?? "");
+  // Passcodes can be as short as 4 chars, so cap guesses per client per
+  // drop. 10/min makes an exhaustive search of even a 4-digit code take
+  // most of a day from one IP.
+  const ip = c.req.header("CF-Connecting-IP") ?? "unknown";
+  const rl = await rateLimit(c.env.DB, `unlock:${slug}:${ip}`, 10, 60_000);
+  if (!rl.ok) {
+    c.header("Retry-After", String(rl.retryAfter));
+    return c.html(
+      passcodeGatePage(c.env, drop, { error: true, rateLimited: true }),
+      429
+    );
+  }
+
+  const form = await c.req.formData().catch(() => null);
+  const passcode = String(form?.get("passcode") ?? "");
   const ok = await verifyPassword(
     passcode,
     drop.password_salt,
@@ -678,7 +695,12 @@ app.post("/p/:slug/unlock", async (c) => {
 
   // 24-hour signed unlock cookie, scoped to this slug.
   const exp = Date.now() + 24 * 3600 * 1000;
-  const value = await signUnlockToken(slug, exp, c.env.TOKEN_PEPPER);
+  const value = await signUnlockToken(
+    slug,
+    exp,
+    c.env.TOKEN_PEPPER,
+    drop.password_hash
+  );
   const cookie = `wu_${slug}=${value}; Path=/p/${slug}; HttpOnly; Secure; SameSite=Lax; Max-Age=${24 * 3600}`;
   return new Response(null, {
     status: 302,
@@ -716,7 +738,12 @@ app.on(["GET", "HEAD"], "/p/:slug/raw", async (c) => {
     const cookie = getCookie(c.req.header("Cookie") ?? "", `wu_${slug}`);
     const ok =
       !!cookie &&
-      (await verifyUnlockToken(cookie, slug, c.env.TOKEN_PEPPER));
+      (await verifyUnlockToken(
+        cookie,
+        slug,
+        c.env.TOKEN_PEPPER,
+        drop.password_hash
+      ));
     if (!ok) {
       // Don't expose locked HTML — redirect to the gate.
       return c.redirect(`/p/${slug}`, 302);
@@ -750,15 +777,43 @@ app.on(["GET", "HEAD"], "/p/:slug/raw", async (c) => {
       "Referrer-Policy": "no-referrer",
       // CSP: allow inline scripts/styles (drops are user-authored), but block
       // top-level navigation hijacking and disallow being framed by other origins.
+      //
+      // `sandbox` (without allow-same-origin) gives the drop an opaque origin
+      // even when it is opened top-level via the "raw →" link. Without it a
+      // drop's script runs as htmlbin.aesir.works and can fetch() other
+      // /p/<slug>/raw URLs with the visitor's unlock cookies attached. The
+      // token list matches the viewer iframe's sandbox attribute.
       "Content-Security-Policy":
+        "sandbox allow-scripts allow-forms allow-modals allow-downloads allow-popups allow-popups-to-escape-sandbox; " +
         "frame-ancestors 'self'; base-uri 'none'; form-action 'self' https:",
     },
   });
 });
 
-// ----- 404 ----------------------------------------------------------------
+// ----- 404 + uncaught errors ----------------------------------------------
+//
+// API and MCP paths answer with the canonical JSON error shape; everything
+// else gets the human 404 page.
+function isApiPath(path: string): boolean {
+  return path === "/mcp" || path === "/api" || path.startsWith("/api/");
+}
+
 app.notFound((c) => {
+  if (isApiPath(c.req.path)) {
+    return apiError(c, "not_found", "No such endpoint.", 404);
+  }
   return c.html(notFoundHtml(c.env.PUBLIC_URL), 404);
+});
+
+app.onError((err, c) => {
+  // Handling the error here stops it reaching withSentry's wrapper, so
+  // report it explicitly.
+  Sentry.captureException(err);
+  console.error("unhandled error", c.req.method, c.req.path, err);
+  if (isApiPath(c.req.path)) {
+    return apiError(c, "internal_error", "Internal server error.", 500);
+  }
+  return c.text("Internal Server Error", 500);
 });
 
 // ----- Helpers ------------------------------------------------------------
@@ -804,7 +859,7 @@ ${STYLE_INLINE}
       <span class="ver">v1</span>
     </div>
     <div class="head-meta">
-      <a href="/htmlbin">/htmlbin</a>
+      <a href="/llms.txt">/llms.txt</a>
       <a href="/api/onboard">/api/onboard</a>
     </div>
   </div>

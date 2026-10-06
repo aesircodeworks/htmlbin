@@ -34,6 +34,9 @@ export type ErrorCode =
   | "version_limit_reached"
   | "last_version_cannot_be_deleted"
   | "metadata_only_on_patch"
+  | "version_conflict"
+  | "markdown_unavailable"
+  | "internal_error"
   | "server_misconfigured";
 
 export type HttpStatus =

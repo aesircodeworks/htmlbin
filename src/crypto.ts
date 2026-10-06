@@ -15,7 +15,7 @@ export function randomBase62(length: number): string {
 }
 
 // Short, human-readable, easy to type (no ambiguous chars).
-// Format: AAAA-BBBB (8 chars, ~32 bits of entropy — fine for 10-min TTL codes).
+// Format: AAAA-BBBB (8 chars × 32-char alphabet = 40 bits — fine for 10-min TTL codes).
 export function randomHumanCode(): string {
   const bytes = new Uint8Array(8);
   crypto.getRandomValues(bytes);
@@ -94,19 +94,25 @@ export async function verifyPassword(
 
 // Sign a tiny opaque cookie value for unlocked drops.
 // Cookie body: `${slug}.${expEpoch}.${hmacHex}`
+//
+// `binding` is the drop's current passcode hash. It goes into the MAC but
+// not the cookie, so changing or removing the passcode invalidates every
+// unlock cookie issued under the old one.
 export async function signUnlockToken(
   slug: string,
   expEpoch: number,
-  pepper: string
+  pepper: string,
+  binding: string
 ): Promise<string> {
-  const mac = await hmacHex(`${slug}|${expEpoch}`, pepper);
+  const mac = await hmacHex(`${slug}|${expEpoch}|${binding}`, pepper);
   return `${slug}.${expEpoch}.${mac}`;
 }
 
 export async function verifyUnlockToken(
   token: string,
   slug: string,
-  pepper: string
+  pepper: string,
+  binding: string
 ): Promise<boolean> {
   const parts = token.split(".");
   if (parts.length !== 3) return false;
@@ -114,7 +120,7 @@ export async function verifyUnlockToken(
   if (s !== slug) return false;
   const exp = Number(expStr);
   if (!Number.isFinite(exp) || exp < Date.now()) return false;
-  const expected = await hmacHex(`${slug}|${exp}`, pepper);
+  const expected = await hmacHex(`${slug}|${exp}|${binding}`, pepper);
   return constantTimeEqual(mac!, expected);
 }
 
