@@ -7,7 +7,7 @@
 // Requires: wrangler logged in (`wrangler login`), Node 18+.
 
 import { execSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,8 +31,10 @@ function patch(file, find, replace) {
 
 console.log("→ Creating D1 database 'htmlbin-db' …");
 let d1Out;
+let freshDb = false;
 try {
   d1Out = sh(`npx wrangler d1 create htmlbin-db`);
+  freshDb = true;
 } catch {
   console.log("  (already exists, fetching id from `d1 list`)");
   d1Out = sh(`npx wrangler d1 list --json`);
@@ -65,6 +67,36 @@ try {
   sh(`npx wrangler d1 execute htmlbin-db --remote --file=./schema.sql`);
 } catch (e) {
   console.warn("  (remote apply failed — run `npm run db:apply:remote` after deploy)");
+}
+
+// schema.sql already contains every column the migrations add. Record the
+// migrations as applied so a later `npm run db:migrate:*` doesn't re-run
+// them and fail on duplicate ALTER TABLE … ADD COLUMN. Only for a database
+// this script just created — on a pre-existing one we can't know which
+// migrations actually ran. The table shape matches what wrangler creates.
+if (freshDb) {
+  console.log("→ Marking migrations as applied (schema.sql already includes them) …");
+  const names = readdirSync(path.join(root, "migrations"))
+    .filter((f) => f.endsWith(".sql"))
+    .sort();
+  if (names.length > 0) {
+    const sql =
+      "CREATE TABLE IF NOT EXISTS d1_migrations(" +
+      "id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, " +
+      "applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL); " +
+      "INSERT OR IGNORE INTO d1_migrations (name) VALUES " +
+      names.map((n) => `('${n.replace(/'/g, "''")}')`).join(", ") +
+      ";";
+    for (const where of ["--local", "--remote"]) {
+      try {
+        sh(`npx wrangler d1 execute htmlbin-db ${where} --command "${sql}"`);
+      } catch {
+        console.warn(`  (couldn't mark migrations ${where} — insert them into d1_migrations by hand)`);
+      }
+    }
+  }
+} else {
+  console.log("  (existing database — run `npm run db:migrate:remote` to apply pending migrations)");
 }
 
 console.log("→ Setting TOKEN_PEPPER secret …");
