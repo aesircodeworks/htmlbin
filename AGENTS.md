@@ -16,9 +16,8 @@ agent does a one-time human-verified device-code dance, then publishes
 self-contained HTML to a public URL. No human after auth. Live at
 **htmlbin.aesir.works**.
 
-Public reinvention of an internal Webflow tool ("wrop"). The Webflow
-codebase at `/Users/utkarshsengar/dev/prototypes/Prototypes` is
-reference-only and must not ship in the public version.
+Public reinvention of an internal Webflow tool ("wrop"). None of that
+codebase may ship in the public version.
 
 ## Stack
 
