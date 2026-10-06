@@ -1,6 +1,7 @@
 import type { Bindings } from "../types";
 import { STYLE_INLINE } from "../styles";
 import { AGENT_MARKS, AGENTS_WITHOUT_MARKS, GITHUB_MARK } from "./logos";
+import type { RecentDrop } from "../recent";
 
 // Curated "a few drops people have made" list. Edit this array + redeploy
 // to rotate. Captions and `kind` labels are hand-written — they don't read
@@ -23,7 +24,10 @@ const EXAMPLES: Array<{ slug: string; caption: string; kind: string }> = [
 // If this slug is ever deleted the frame goes blank. Swap it here.
 const SHOWCASE_SLUG = "ztx4J9P";
 
-export function landingPage(env: Bindings): string {
+// `recentDrops` feeds the "recently published" list under the curated
+// examples. Callers that cache the page for long (the markdown variant)
+// pass nothing, so a stale or since-locked title can't linger there.
+export function landingPage(env: Bindings, recentDrops: RecentDrop[] = []): string {
   const PUBLIC_URL = env.PUBLIC_URL;
   const HOST = stripScheme(PUBLIC_URL);
   const agentPrompt = `Explain this as an HTML page — visual, not a wall of text.
@@ -211,6 +215,7 @@ Publish it to <span class="em">${escapeText(HOST)}</span>. Start at <span class=
         ).join("\n        ")}
       </ul>
     </div>
+${recentSection(recentDrops)}
   </section>
 
   <div class="footer-merged">
@@ -246,6 +251,43 @@ Publish it to <span class="em">${escapeText(HOST)}</span>. Start at <span class=
 </script>
 </body>
 </html>`;
+}
+
+// Second, quieter list under the curated one: the newest titled, unlocked
+// drops. Curated slugs are skipped so a row never shows twice, and the
+// whole block is omitted when nothing is left.
+function recentSection(drops: RecentDrop[]): string {
+  const curated = new Set(EXAMPLES.map((ex) => ex.slug));
+  const rows = drops.filter((d) => !curated.has(d.slug));
+  if (rows.length === 0) return "";
+  const now = Date.now();
+  const items = rows
+    .map(
+      (d) =>
+        `<li><a href="/p/${escapeAttr(d.slug)}"><span class="slug">/p/${escapeText(d.slug)}</span><span class="caption">${escapeText(truncate(d.title, 50))}</span><span class="when">${relativeTime(d.created_at, now)}</span></a></li>`,
+    )
+    .join("\n        ");
+  return `    <p class="eyebrow eyebrow-recent">recently published</p>
+    <div class="examples recent">
+      <ul>
+        ${items}
+      </ul>
+    </div>`;
+}
+
+// Terse age: "<1m", "3m", "4h", "2d". No "ago" — the column says it.
+function relativeTime(thenMs: number, nowMs: number): string {
+  const mins = Math.floor(Math.max(0, nowMs - thenMs) / 60_000);
+  if (mins < 1) return "&lt;1m";
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
+
+function truncate(s: string, max: number): string {
+  const chars = Array.from(s);
+  return chars.length > max ? chars.slice(0, max - 1).join("").trimEnd() + "…" : s;
 }
 
 function stripScheme(url: string): string {

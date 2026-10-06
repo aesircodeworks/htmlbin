@@ -25,6 +25,10 @@ assert_contains() {
   local hay="$1" needle="$2" msg="$3"
   if echo "$hay" | grep -q -- "$needle"; then ok "$msg"; else fail "$msg" "missing: $needle"; fi
 }
+assert_not_contains() {
+  local hay="$1" needle="$2" msg="$3"
+  if echo "$hay" | grep -q -- "$needle"; then fail "$msg" "unexpected: $needle"; else ok "$msg"; fi
+}
 assert_json() {
   local file="$1" jq_filter="$2" want="$3" msg="$4"
   local got
@@ -485,6 +489,57 @@ assert_contains "$ERR_FILT" "invalid_arg" "bad filter key on GET → invalid_arg
 
 # Tidy up the metadata test drop so the account count stays clean
 curl -s -X DELETE "$BASE/api/drops/$SLUG_M" -H "Authorization: Bearer $TOKEN" > /dev/null
+
+# ---------------------------------------------------------------------------
+section "4c. homepage — recently published feed"
+# ---------------------------------------------------------------------------
+# The landing lists the newest titled, unlocked drops. Writes that change
+# eligibility drop the KV cache (src/recent.ts), so every check below sees
+# the list rebuilt from D1 rather than waiting out the 5-minute TTL.
+FEED_SECRET="feed-secret-$RANDOM$RANDOM"
+jq -n --rawfile h "$TMP/drop.html" --arg s "$FEED_SECRET" '{
+  title:"e2e feed <b>&",
+  html:$h,
+  metadata:{secret:$s}
+}' | curl -s -X POST "$BASE/api/drops" \
+       -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+       -d @- -o "$TMP/feed.json"
+SLUG_F=$(jq -r .slug < "$TMP/feed.json")
+
+jq -n --rawfile h "$TMP/drop.html" '{title:"e2e feed locked", html:$h, passcode:"hunter22"}' \
+| curl -s -X POST "$BASE/api/drops" \
+    -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+    -d @- -o "$TMP/feed-locked.json"
+SLUG_FL=$(jq -r .slug < "$TMP/feed-locked.json")
+
+HOME_HTML=$(curl -s "$BASE/")
+assert_contains "$HOME_HTML" "recently published" "GET / renders the recently published section"
+assert_contains "$HOME_HTML" "href=\"/p/$SLUG_F\"" "a new titled drop is listed on the homepage"
+assert_contains "$HOME_HTML" "e2e feed &lt;b&gt;&amp;" "feed titles are HTML-escaped"
+assert_contains "$HOME_HTML" "class=\"when\">&lt;1m<" "feed rows carry a terse age"
+assert_not_contains "$HOME_HTML" "/p/$SLUG_FL\"" "a drop created with a passcode is never listed"
+assert_not_contains "$HOME_HTML" "$FEED_SECRET" "owner-only metadata never reaches the homepage"
+
+# Locking a listed drop removes it straight away; unlocking brings it back.
+curl -s -X POST "$BASE/api/drops/$SLUG_F/passcode" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"passcode":"hunter22"}' > /dev/null
+assert_not_contains "$(curl -s "$BASE/")" "/p/$SLUG_F\"" "locking a drop removes it from the feed"
+curl -s -X POST "$BASE/api/drops/$SLUG_F/passcode" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"passcode":""}' > /dev/null
+assert_contains "$(curl -s "$BASE/")" "/p/$SLUG_F\"" "removing the passcode lists it again"
+
+# A title edit shows up on the next homepage hit.
+curl -s -X PATCH "$BASE/api/drops/$SLUG_F" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"title":"e2e feed renamed"}' > /dev/null
+assert_contains "$(curl -s "$BASE/")" "e2e feed renamed" "a renamed drop shows its new title in the feed"
+
+# Deleting a drop removes it.
+curl -s -X DELETE "$BASE/api/drops/$SLUG_F" -H "Authorization: Bearer $TOKEN" > /dev/null
+curl -s -X DELETE "$BASE/api/drops/$SLUG_FL" -H "Authorization: Bearer $TOKEN" > /dev/null
+assert_not_contains "$(curl -s "$BASE/")" "/p/$SLUG_F\"" "a deleted drop leaves the feed"
 
 # ---------------------------------------------------------------------------
 section "5. passcode lifecycle"

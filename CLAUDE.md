@@ -122,6 +122,19 @@ change. Per-page overrides should stay tiny. Don't hard-code
 - `EXAMPLES` — the hand-curated "a few pages people have published" list.
 - One clipboard payload, built inside `landingPage` from `PUBLIC_URL`.
   One `<pre>`. No prompt tabs.
+- The "recently published" list under `EXAMPLES` — the 10 newest drops
+  from the last 30 days that have a title and **no passcode**, minus
+  any curated slug. Query is `listRecentPublicDrops()` in `src/db.ts`
+  and selects only `slug, title, created_at` (never `user_id` or
+  `metadata`). It is read through KV in `src/recent.ts`: key
+  `feed:recent:v1`, 5-minute TTL, so D1 sees at most ~288 queries/day
+  however busy `/` gets. Every write that changes eligibility or what
+  a row shows (create, full delete, passcode set/remove, title change
+  on PUT/PATCH) calls `invalidateRecentDrops()`; add the call to any
+  new write path that can do the same. If KV or D1 fails, the section
+  is just omitted. The markdown landing (`md:landing`, cached 1h) is
+  rendered without the feed on purpose so a since-locked title can't
+  linger there. Index `idx_drops_created_at` (migration 0004) backs it.
 - `SHOWCASE_SLUG` — the drop embedded as evidence. Uses `/p/<slug>/raw`,
   which does **not** bump `view_count`, so homepage traffic doesn't
   inflate that drop's counter. No fallback: delete the drop and the

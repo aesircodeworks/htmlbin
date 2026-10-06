@@ -61,6 +61,11 @@ CREATE TABLE IF NOT EXISTS drops (
 CREATE INDEX IF NOT EXISTS idx_drops_user_created
   ON drops(user_id, created_at DESC);
 
+-- Global newest-first scan for the homepage "recently published" feed
+-- (listRecentPublicDrops in src/db.ts).
+CREATE INDEX IF NOT EXISTS idx_drops_created_at
+  ON drops(created_at DESC);
+
 -- One row per version. Each version can carry its own optional `context`
 -- — free-form text the agent may include to explain its thinking, prompt,
 -- or reasoning trace. Context is opt-in per version because it can be
