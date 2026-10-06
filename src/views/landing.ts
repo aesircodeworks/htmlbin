@@ -7,11 +7,11 @@ import type { RecentDrop } from "../recent";
 // to rotate. Captions and `kind` labels are hand-written — they don't read
 // from the drop's stored title.
 const EXAMPLES: Array<{ slug: string; caption: string; kind: string }> = [
-  { slug: "gDMy7Vb",   caption: "how htmlbin works — an animated explainer",  kind: "explainer" },
-  { slug: "1Wyf23j",   caption: "cross-platform gstack — pr #1111 deep dive", kind: "pr writeup" },
+  { slug: "H7cKiUROL", caption: "how htmlbin works — an animated explainer",  kind: "explainer" },
+  { slug: "BIiHQsxyW", caption: "permanent version numbers — pr deep dive",   kind: "pr writeup" },
   { slug: "2RXox535H", caption: "docs nav — three redesigns side by side",    kind: "design" },
-  { slug: "i2taphP",   caption: "google logo — animation playground",         kind: "playful" },
-  { slug: "HYmZ6DjCM", caption: "plan: queryable drop metadata",              kind: "plan / spec" },
+  { slug: "OWadidxIz", caption: "htmlbin wordmark — animation playground",    kind: "playful" },
+  { slug: "hk7IdJ8Lz", caption: "plan: queryable drop metadata",              kind: "plan / spec" },
 ];
 
 // The drop embedded above the fold as evidence. Picked because it is light
