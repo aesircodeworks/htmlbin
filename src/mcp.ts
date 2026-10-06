@@ -233,7 +233,12 @@ export async function handleMcp(c: Ctx, app: App): Promise<Response> {
     return jsonRpc(message?.id ?? null, { code: -32600, message: "Invalid request." }, 400);
   }
 
-  const protocol = negotiate(message.params?.protocolVersion);
+  // initialize negotiates from params.protocolVersion. Every later request
+  // carries the agreed version in the MCP-Protocol-Version header.
+  const protocol =
+    message.method === "initialize"
+      ? negotiate(message.params?.protocolVersion)
+      : fromHeader(c.req.header("MCP-Protocol-Version"));
 
   if (message.id === undefined || message.id === null) {
     return new Response(null, { status: 202, headers: protocolHeader(protocol) });
@@ -293,8 +298,18 @@ export async function handleMcp(c: Ctx, app: App): Promise<Response> {
   );
 }
 
+// Per the MCP lifecycle spec: echo the client's version when we support
+// it, otherwise answer with the latest version we support.
 function negotiate(requested: string | undefined): string {
   if (requested && PROTOCOL_VERSIONS.includes(requested)) return requested;
+  return PROTOCOL_VERSIONS[0]!;
+}
+
+// Post-initialize requests. A missing header means 2025-03-26 (the spec's
+// backwards-compatibility default); an unknown one falls back the same way
+// rather than failing the call.
+function fromHeader(value: string | undefined): string {
+  if (value && PROTOCOL_VERSIONS.includes(value)) return value;
   return "2025-03-26";
 }
 
