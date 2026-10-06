@@ -415,7 +415,7 @@ Vertical order, top to bottom. Everything is centred.
 
                        WHAT YOU SEND SOMEONE
    ┌─────────────────────────────────────────────────────────────┐
-   │ htmlbin.aesir.works/p/ztx4J9P · v1  open the live page ↗            │
+   │ htmlbin.aesir.works/p/2RXox535H · v1  open the live page ↗          │
    ├─────────────────────────────────────────────────────────────┤
    │            [ a real drop, live in an iframe ]               │
    └─────────────────────────────────────────────────────────────┘
@@ -433,8 +433,8 @@ Vertical order, top to bottom. Everything is centred.
      Start from a real structure.    Keep some pages private.
 
                   A FEW PAGES PEOPLE HAVE PUBLISHED
-     /p/gDMy7Vb   how htmlbin works             EXPLAINER
-     /p/1Wyf23j   cross-platform gstack …       PR WRITEUP
+     /p/H7cKiUROL how htmlbin works             EXPLAINER
+     /p/BIiHQsxyW permanent version numbers …   PR WRITEUP
 
                         RECENTLY PUBLISHED
      /p/aB3xK7gPq A bayesian intuition pump             3m
