@@ -6,6 +6,7 @@ import { githubOAuthRoutes } from "./github-oauth";
 import { apiRoutes } from "./drops";
 import { buildOnboardJson, buildOnboardText } from "./onboard";
 import { landingPage } from "./views/landing";
+import { getRecentDropsCached } from "./recent";
 import { verifyPage } from "./views/verify";
 import { viewerPage, passcodeGatePage } from "./views/viewer";
 import { FAVICON_SVG } from "./views/favicon";
@@ -150,12 +151,12 @@ app.on(["GET", "HEAD"], "/", async (c) => {
     return landingAsMarkdown(c);
   }
   c.header("Link", linkHeader(c.env.PUBLIC_URL));
-  // Landing is effectively static between deploys (EXAMPLES array is
-  // baked into the bundle). 1min browser, 5min edge — the edge stops
-  // hammering the Worker for repeat traffic; browser cache is short
-  // enough that copy edits surface fast.
+  // Landing is static between deploys apart from the "recently published"
+  // list, which is itself KV-cached for 5 min (src/recent.ts). 1min
+  // browser, 5min edge — the edge stops hammering the Worker for repeat
+  // traffic; browser cache is short enough that copy edits surface fast.
   c.header("Cache-Control", "public, max-age=60, s-maxage=300");
-  return c.html(landingPage(c.env));
+  return c.html(landingPage(c.env, await getRecentDropsCached(c.env)));
 });
 
 // Explicit URL form for the markdown view of the landing — easy to

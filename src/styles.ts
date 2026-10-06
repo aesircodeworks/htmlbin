@@ -1392,6 +1392,18 @@ body.landing main { max-width: none; margin: 0; padding: 0; }
 body.landing .caps { max-width: 900px; margin: 0 auto; gap: 36px 52px; }
 body.landing .examples { max-width: 760px; margin: 0 auto; }
 body.landing .examples .cue { display: none; }
+/* Recently published: the curated list's quieter sibling. Same mono
+   directory-listing rows, a little dimmer, with a terse age column
+   ("3m", "4h", "2d") where the curated list has its kind label. */
+.lsec .eyebrow.eyebrow-recent { margin-top: 44px; }
+.examples.recent a { grid-template-columns: 13ch 1fr 4ch; }
+.examples.recent a .caption { color: var(--ink-2); }
+.examples.recent a .when { color: var(--ink-softer); text-align: right; }
+.examples.recent a:hover .caption,
+.examples.recent a:hover .when { color: var(--red); }
+@media (max-width: 600px) {
+  .examples.recent a { grid-template-columns: min-content 1fr auto; }
+}
 /* Bottom spacing is padding, not margin, on purpose. As a margin it
    collapsed through main (padding:0) and out of body, so it landed
    outside the tinted background box and html's white showed through as

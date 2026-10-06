@@ -11,6 +11,7 @@ import {
   rateLimit,
 } from "./db";
 import { apiError } from "./errors";
+import { invalidateRecentDrops } from "./recent";
 
 const MAX_HTML_BYTES = 2 * 1024 * 1024; // 2 MB
 const MAX_TITLE = 200;
@@ -320,6 +321,8 @@ apiRoutes.post("/drops", async (c) => {
     ).bind(slug, sizeBytes, context || null, now),
   ]);
 
+  if (!passcodeHash) await invalidateRecentDrops(c.env);
+
   const created = await getDrop(c.env.DB, slug);
   return c.json(serializeDrop(created!, c.env.PUBLIC_URL), 201);
 });
@@ -467,6 +470,7 @@ apiRoutes.put("/drops/:slug", async (c) => {
       nextVersion, now, slug, user.id
     ),
   ]);
+  if (title !== undefined) await invalidateRecentDrops(c.env);
 
   const updated = await getDrop(c.env.DB, slug);
   return c.json(serializeDrop(updated!, c.env.PUBLIC_URL));
@@ -557,6 +561,7 @@ apiRoutes.patch("/drops/:slug", async (c) => {
       Date.now(), slug, user.id
     )
     .run();
+  if (title !== undefined) await invalidateRecentDrops(c.env);
 
   const updated = await getDrop(c.env.DB, slug);
   return c.json(serializeDrop(updated!, c.env.PUBLIC_URL));
@@ -715,6 +720,7 @@ apiRoutes.delete("/drops/:slug", async (c) => {
   await Promise.all(
     versions.map((v) => c.env.DROPS_KV.delete(`html:${slug}:v${v.version}`))
   );
+  await invalidateRecentDrops(c.env);
 
   return new Response(null, { status: 204 });
 });
@@ -767,6 +773,8 @@ apiRoutes.post("/drops/:slug/passcode", async (c) => {
       .bind(hash, salt, Date.now(), slug)
       .run();
   }
+  // Locking or unlocking changes feed eligibility.
+  await invalidateRecentDrops(c.env);
 
   const updated = await getDrop(c.env.DB, slug);
   return c.json(serializeDrop(updated!, c.env.PUBLIC_URL));

@@ -1,6 +1,13 @@
 # Plan — subtle "recent drops" feed on the homepage
 
 > Drafted 2026-05-10 during launch sprint. Tabled for post-launch revisit.
+>
+> **Implemented 2026-10-06.** Differences from this draft: the heading is
+> the eyebrow "recently published" (the landing redesign replaced `↓` cues
+> with eyebrows), the list sits inside the curated section rather than
+> before a signoff, and writes that change eligibility (create, delete,
+> passcode, title edit) invalidate the KV key instead of waiting out the
+> TTL. CLAUDE.md has the current contract.
 
 ## Context
 

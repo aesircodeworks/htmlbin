@@ -267,3 +267,28 @@ export async function sweepExpiredAuthState(db: D1Database): Promise<void> {
 }
 
 export type Env = Bindings;
+
+// Homepage "recently published" feed. Only titled, unlocked drops from the
+// last `sinceMs` window; passcode-locked drops never leave the owner's own
+// listing. Selects just the three public columns — never user_id or
+// metadata, which are owner-only. Served through the KV read-through in
+// src/recent.ts, not called per request.
+export async function listRecentPublicDrops(
+  db: D1Database,
+  limit: number,
+  sinceMs: number
+): Promise<Pick<Drop, "slug" | "title" | "created_at">[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT slug, title, created_at
+         FROM drops
+        WHERE title != ''
+          AND password_hash IS NULL
+          AND created_at >= ?
+        ORDER BY created_at DESC
+        LIMIT ?`
+    )
+    .bind(sinceMs, limit)
+    .all<Pick<Drop, "slug" | "title" | "created_at">>();
+  return results ?? [];
+}

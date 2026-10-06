@@ -436,6 +436,10 @@ Vertical order, top to bottom. Everything is centred.
      /p/gDMy7Vb   how htmlbin works             EXPLAINER
      /p/1Wyf23j   cross-platform gstack …       PR WRITEUP
 
+                        RECENTLY PUBLISHED
+     /p/aB3xK7gPq A bayesian intuition pump             3m
+     /p/q9mN2vJxx Why DNS feels slow                    1h
+
    ───────────────────────────────────────────────────────────────────
    — htmlbin                      agent-card · /api/onboard · @utsengar
 ```
@@ -455,6 +459,14 @@ breaks one, it is a regression regardless of how it looks:
 
 The page shipped for a while answering only the first, which is how it
 ended up with no call to action at all.
+
+**The recently published list is the curated list's quieter sibling.**
+Same `.examples` rows inside the same section, under its own eyebrow:
+titles one step dimmer (`--ink-2`), a terse age column (`3m`, `4h`,
+`2d`, no "ago") in `--ink-softer` where the curated list has its kind
+label, titles cut at 50 characters. No pulse, no "live" badge, no
+animation. Curated slugs are skipped so a row never appears twice, and
+the whole block is omitted when nothing is eligible.
 
 **Bottom spacing must be padding, not margin.** `.footer-merged` is the
 last child of a `<main>` with `padding: 0`, so a bottom *margin* collapses
