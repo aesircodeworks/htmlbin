@@ -103,12 +103,12 @@ export function buildOnboardJson(publicUrl: string): object {
           url: `${publicUrl}/api/auth/poll`,
           query: { token: "<poll_token from step 1>" },
           returns: {
-            status: "'pending' | 'verified' | 'expired' | 'claimed' | 'not_found'",
+            status: "'pending' | 'verified' | 'expired' | 'claimed'",
             api_token: "string (only on first 'verified' read; revealed exactly once)",
             user_id: "string (only on first 'verified' read)",
           },
           note:
-            "Poll every poll_interval seconds until status != 'pending'. The api_token is shown once — store it.",
+            "Poll every poll_interval seconds until status != 'pending'. The api_token is shown once — store it. Claim it within 10 minutes of the human signing in or the row expires and the token is discarded. An unknown poll token is a 404 with error.code 'not_found'.",
         },
       ],
     },
@@ -116,11 +116,11 @@ export function buildOnboardJson(publicUrl: string): object {
       description:
         "Every endpoint that creates, reads, or mutates a single drop returns this shape.",
       example: {
-        slug: "aB3xK7g",
+        slug: "aB3xK7gPq",
         title: "My page",
         description: "Optional subtitle",
-        url: `${publicUrl}/p/aB3xK7g`,
-        raw_url: `${publicUrl}/p/aB3xK7g/raw`,
+        url: `${publicUrl}/p/aB3xK7gPq`,
+        raw_url: `${publicUrl}/p/aB3xK7gPq/raw`,
         locked: false,
         latest_version: 3,
         view_count: 17,
@@ -273,6 +273,7 @@ export function buildOnboardJson(publicUrl: string): object {
       max_versions_per_drop: 200,
       writes_per_minute: 60,
       writes_per_day: 500,
+      write_limits_scope: "account",
       drops_per_account: 500,
       verification_ttl_seconds: 600,
     },
@@ -309,6 +310,7 @@ export function buildOnboardJson(publicUrl: string): object {
         "version_not_found",
         "last_version_cannot_be_deleted",
         "version_limit_reached",
+        "version_conflict",
         "invalid_slug",
         "invalid_arg",
         "invalid_json",
@@ -471,11 +473,11 @@ jq -n --arg title "My Prototype" \\
 Response (HTTP 201): the full \`Drop\` object:
 \`\`\`json
 {
-  "slug": "aB3xK7g",
+  "slug": "aB3xK7gPq",
   "title": "My Prototype",
   "description": "What this is showing",
-  "url": "${publicUrl}/p/aB3xK7g",
-  "raw_url": "${publicUrl}/p/aB3xK7g/raw",
+  "url": "${publicUrl}/p/aB3xK7gPq",
+  "raw_url": "${publicUrl}/p/aB3xK7gPq/raw",
   "locked": false,
   "latest_version": 1,
   "view_count": 0,
@@ -633,16 +635,18 @@ share gate — not encryption.
 429 responses carry a \`Retry-After\` header and a
 \`details.retry_after_seconds\` field. Back off accordingly.
 
-Limits: 60 writes/min, 500 writes/day, 500 drops/account, 200 versions/drop, 2 MB / drop.
+Limits: 60 writes/min and 500 writes/day per account (every mutating call
+counts), 500 drops/account, 200 versions/drop, 2 MB / drop.
 
 ## Errors
 
-All errors share \`{ "error": { "code, message, details? } }\`.
+All errors share \`{ "error": { "code", "message", "details"? } }\`.
 Switch on \`error.code\`. Common codes: \`unauthorized\`, \`invalid_token\`,
 \`rate_limited\`, \`daily_quota_exceeded\`, \`quota_exceeded\`,
 \`html_too_large\`, \`html_required\`, \`title_required\`, \`forbidden\`,
 \`not_found\`, \`version_not_found\`, \`metadata_only_on_patch\`,
-\`last_version_cannot_be_deleted\`, \`token_required\`.
+\`last_version_cannot_be_deleted\`, \`version_conflict\`,
+\`passcode_too_short\`, \`token_required\`.
 
 That's the whole API. Build something good.
 `;

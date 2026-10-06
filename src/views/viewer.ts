@@ -245,7 +245,7 @@ ${
 <iframe class="canvas"
         src="/p/${slug}/raw${isLatest ? "" : `?v=${current}`}"
         title="${title}"
-        sandbox="allow-scripts allow-forms allow-modals allow-downloads"
+        sandbox="allow-scripts allow-forms allow-modals allow-downloads allow-popups allow-popups-to-escape-sandbox"
         loading="lazy"></iframe>
 
 <script>
@@ -298,7 +298,7 @@ ${
 export function passcodeGatePage(
   env: Bindings,
   drop: Drop,
-  state: { error: boolean }
+  state: { error: boolean; rateLimited?: boolean }
 ): string {
   const slug = escapeHtml(drop.slug);
   const title = escapeHtml(drop.title);
@@ -345,7 +345,13 @@ ${pageHead({ verb: "GET", path: `/p/${slug}` })}
         <button type="button" id="passcode-toggle" class="gate-show" aria-label="show passcode">show</button>
       </div>
       <button type="submit" class="gate-submit">unlock</button>
-      ${state.error ? `<p class="gate-error">incorrect passcode</p>` : ""}
+      ${
+        state.rateLimited
+          ? `<p class="gate-error">too many attempts · wait a minute</p>`
+          : state.error
+            ? `<p class="gate-error">incorrect passcode</p>`
+            : ""
+      }
     </form>
     <p class="gate-fine">soft gate · not encryption</p>
   </section>

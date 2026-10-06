@@ -127,12 +127,14 @@ ${publicUrl}/.well-known/agent-skills/htmlbin/SKILL.md.
 - GET    /api/drops                  → list yours
 - GET    /api/drops/:slug            → metadata
 - PUT    /api/drops/:slug            → mints a new version
+- PATCH  /api/drops/:slug            → title / description / metadata only
 - GET    /api/drops/:slug/versions   → list versions
 - GET    /api/drops/:slug/v/:n       → version metadata + context
+- DELETE /api/drops/:slug/v/:n       → delete one version
 - DELETE /api/drops/:slug            → delete (all versions)
 - POST   /api/drops/:slug/passcode   → set/change/remove passcode
-- GET    /api/tokens                      → list your active tokens
-- DELETE /api/tokens/:id                  → revoke a token (id = first 12 hex)
+- GET    /api/tokens                 → list your tokens (revoked ones carry revoked_at)
+- DELETE /api/tokens/:id             → revoke a token (id = first 12 hex)
 
 ### viewer
 - GET /p/:slug          → public viewer (latest version)
@@ -143,15 +145,18 @@ ${publicUrl}/.well-known/agent-skills/htmlbin/SKILL.md.
 ## Limits
 
 - 2 MB per HTML
-- 60 writes / minute / token
+- 60 writes / minute / account
+- 500 writes / day / account
 - 500 drops per account
+- 200 versions per drop
 - 10-minute TTL on verification codes
 
 ## Errors
 
-All errors are JSON: { "error": "<code>" } with appropriate HTTP status.
-Common codes: unauthorized, invalid_token, rate_limited, html_too_large,
-forbidden, not_found, expired_code, passcode_too_short.
+All errors are JSON: { "error": { "code", "message", "details"? } } with an
+appropriate HTTP status. Switch on error.code. Common codes: unauthorized,
+invalid_token, rate_limited, daily_quota_exceeded, html_too_large,
+forbidden, not_found, version_conflict, passcode_too_short.
 
 ## Source
 
@@ -293,7 +298,7 @@ export function agentCard(publicUrl: string): object {
       {
         id: "list_my_tokens",
         description:
-          "List active tokens for this user across machines (read-only, no plaintext).",
+          "List this user's tokens across machines, including revoked ones (revoked_at set). No plaintext.",
         method: "GET",
         path: "/api/tokens",
       },
@@ -596,7 +601,7 @@ export function openApiSpec(publicUrl: string): object {
       },
       "/api/tokens": {
         get: {
-          summary: "List active tokens for the caller",
+          summary: "List the caller's tokens (revoked ones included, with revoked_at)",
           security: [{ bearerAuth: [] }],
           responses: {
             "200": {
@@ -723,6 +728,7 @@ export function openApiSpec(publicUrl: string): object {
           responses: {
             "200": { description: "Updated — returns the full Drop with bumped latest_version", content: { "application/json": { schema: { $ref: "#/components/schemas/Drop" } } } },
             "400": { description: "Missing html / validation", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } },
+            "409": { description: "version_conflict — a concurrent PUT minted the next version first; re-fetch and retry", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } },
             "429": { description: "Rate limit, daily quota, or per-drop version cap (Retry-After header where applicable)", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } },
           },
         },

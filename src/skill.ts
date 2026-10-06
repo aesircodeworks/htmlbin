@@ -121,7 +121,8 @@ Walkthrough:
    curl -s -X POST https://htmlbin.aesir.works/api/auth/start | jq
    \`\`\`
 
-   Returns \`code\` (e.g. \`ABCD-EFGH\`), \`verification_url\`, \`poll_token\`,
+   Returns \`code\` (e.g. \`ABCD-EFGH\`), \`verification_url\` (e.g.
+   \`https://htmlbin.aesir.works/verify?code=ABCD-EFGH\`), \`poll_token\`,
    \`expires_in\` (seconds), and \`poll_interval\` (seconds).
 
 2. Print the verification URL (and the code, for confirmation) so the
@@ -154,7 +155,7 @@ Walkthrough:
 **Linking a second machine to the same identity:** open \`/verify\` on the
 new machine and sign in with the same GitHub account. We bind one htmlbin
 account per GitHub identity, so the new device's token attaches to the
-same \`user_id\` automatically.
+same \`user_id\` automatically. One human, many agents, shared drops.
 
 ## Common operations
 
@@ -177,11 +178,11 @@ Returns the full Drop (HTTP 201):
 
 \`\`\`json
 {
-  "slug": "aB3xK7g",
+  "slug": "aB3xK7gPq",
   "title": "My page",
   "description": "Optional subtitle",
-  "url": "https://htmlbin.aesir.works/p/aB3xK7g",
-  "raw_url": "https://htmlbin.aesir.works/p/aB3xK7g/raw",
+  "url": "https://htmlbin.aesir.works/p/aB3xK7gPq",
+  "raw_url": "https://htmlbin.aesir.works/p/aB3xK7gPq/raw",
   "locked": false,
   "latest_version": 1,
   "view_count": 0,
@@ -203,7 +204,10 @@ curl -s -X PUT "https://htmlbin.aesir.works/api/drops/<slug>" \\
 \`\`\`
 
 **PUT requires \`html\`.** The slug never changes; \`latest_version\`
-increments. Old versions remain at \`/p/<slug>?v=N\`. Returns the full Drop.
+increments. Old versions remain at \`/p/<slug>?v=N\`, and a version number
+is never reused, even after that version is deleted. Returns the full Drop.
+If another update to the same drop lands at the same moment, PUT returns
+\`409 version_conflict\` — re-fetch and retry.
 The MCP tool is \`update_drop\`.
 
 ### Update title/description/metadata only (PATCH)
@@ -217,7 +221,7 @@ curl -s -X PATCH "https://htmlbin.aesir.works/api/drops/<slug>" \\
 
 PATCH never mints a new version. Including \`html\` in the body returns
 \`400 metadata_only_on_patch\` — use PUT instead. \`metadata\` (see below)
-can be updated here too. The MCP tool is \`patch_drop\`. Send \`metadata: {}\`
+can also be updated here. The MCP tool is \`patch_drop\`. Send \`metadata: {}\`
 to clear the tag bag.
 
 ### List drops (paginated, filterable)
@@ -249,6 +253,13 @@ Query params: \`page\` (default 1), \`pageSize\` (default 50, max 200),
 \`sortOrder\` (\`asc\` | \`desc\`, default \`desc\`). The MCP tool is
 \`list_drops\`; pass \`metadata\` as an object and \`page_size\` for the cap.
 
+### Look up one drop
+
+\`\`\`bash
+curl -s -H "Authorization: Bearer $(cat .htmlbin/token)" \\
+  https://htmlbin.aesir.works/api/drops/<slug> | jq
+\`\`\`
+
 ### Set or change a passcode
 
 \`\`\`bash
@@ -259,8 +270,7 @@ curl -s -X POST "https://htmlbin.aesir.works/api/drops/<slug>/passcode" \\
 \`\`\`
 
 Pass \`"passcode": ""\` to remove. Returns the full updated Drop. The
-passcode is a soft share gate — readers without it see a "locked" page —
-not encryption.
+passcode is a soft share gate, not encryption.
 
 ### Delete a single version
 
@@ -270,7 +280,8 @@ curl -s -X DELETE "https://htmlbin.aesir.works/api/drops/<slug>/v/<n>" \\
 \`\`\`
 
 Refused with \`409 last_version_cannot_be_deleted\` for the only remaining
-version. Returns the full updated Drop.
+version — a drop must always keep at least one body. Returns the full
+updated Drop (with possibly-recomputed \`latest_version\`).
 
 ### Delete the whole drop
 
@@ -293,10 +304,14 @@ Returns \`user_id\`, \`created_at\`, \`drop_count\`, and the calling token's
 
 ## Optional request fields
 
-- \`title\` (string, ≤200 chars) — human label, shown in viewer chrome and on the per-drop OG card
+- \`title\` (string, ≤200 chars) — human label, shown in viewer chrome and
+  on the per-drop OG card
 - \`description\` (string, ≤500 chars) — subtitle in viewer chrome
 - \`passcode\` (string, ≥4 chars) — soft share gate, shown on \`/p/<slug>\` before the body
-- \`context\` (string, ≤64 KB) — the reasoning trace, prompt, or thinking that produced this version. **Opt-in only**: include only after the human has explicitly agreed, since it can include prompt content from the conversation.
+- \`context\` (string, ≤64 KB) — the reasoning trace, prompt, or thinking
+  that produced this version. **Opt-in only**: include only after the
+  human has explicitly agreed, since it can include prompt content from
+  the conversation.
 - \`metadata\` (object, ≤10 keys, string→string) — owner-side tag bag.
   Free-form: tag drops with whatever lets you find them again later.
   Filterable on the list endpoint, not exposed on the public viewer.
@@ -355,16 +370,19 @@ usually don't race.
 
 Metadata replace semantics on PUT/PATCH: omit the field to leave it
 untouched, send \`{}\` to clear it, send \`{k:v}\` to overwrite the whole
-map. Limits: ≤10 keys, ≤64 chars per key (alphanumerics, \`_\`, \`.\`,
-\`-\`; no leading or trailing punctuation), ≤256 chars per value. Values
-must be strings — stringify numbers and booleans agent-side.
+map. Limits: ≤10 keys, ≤64 chars per key (alphanumerics, \`_\`, \`.\`, \`-\`;
+no leading or trailing punctuation), ≤256 chars per value. Values must
+be strings — stringify numbers and booleans agent-side.
 
 ## Rate limiting
 
-429 responses carry a \`Retry-After\` header and \`details.retry_after_seconds\`. Codes:
+429 responses carry a \`Retry-After\` header and \`details.retry_after_seconds\`.
+Write limits are per account (every token for the same GitHub identity
+shares them). Every mutating call counts: POST, PUT, PATCH, DELETE, and
+setting a passcode. Codes:
 
-- \`rate_limited\` — 60 writes/min/token
-- \`daily_quota_exceeded\` — 500 writes/day/token
+- \`rate_limited\` — 60 writes/min/account
+- \`daily_quota_exceeded\` — 500 writes/day/account
 - \`quota_exceeded\` — 500 drops/account
 - \`version_limit_reached\` — 200 versions/drop
 
@@ -375,8 +393,8 @@ Read live values from \`/api/onboard.limits\`; current defaults:
 - 2 MB / drop body
 - 64 KB / context per version
 - 200 versions / drop
-- 60 writes / minute / token
-- 500 writes / day / token
+- 60 writes / minute / account
+- 500 writes / day / account
 - 500 drops / account
 - 10-min TTL on verification codes
 
@@ -386,7 +404,7 @@ Read live values from \`/api/onboard.limits\`; current defaults:
 - Specific version: \`https://htmlbin.aesir.works/p/<slug>?v=<n>\`
 - Raw HTML (no chrome): \`https://htmlbin.aesir.works/p/<slug>/raw\`
 - Per-drop OG card: \`https://htmlbin.aesir.works/p/<slug>/og.svg\` (or \`.png\`)
-- Slugs are 7-char base62: \`^[A-Za-z0-9]{7}$\`
+- Slugs are 9-char base62 (older drops may be 6–12): \`^[A-Za-z0-9]{6,12}$\`
 - Tokens are \`hb_\` + base62: \`^hb_[A-Za-z0-9]+$\`
 
 ## Quality floor
@@ -401,14 +419,14 @@ These apply to every drop regardless of pattern or brand context. They're not pl
   - **\`<pre>\` / code blocks must not set page width.** Two acceptable patterns: (a) \`white-space: pre-wrap; overflow-wrap: anywhere\` for short snippets where wrapping is fine, or (b) \`overflow-x: auto; max-width: 100%\` on the \`<pre>\` itself for code where line breaks matter (the block scrolls internally, the page doesn't). Pick one per block; never let a \`<pre>\` push the body wider.
   - **Tables don't set page width either.** Under 640px, either restyle as stacked rows (\`table, tbody, tr, td { display: block }\` with per-cell labels) or wrap the \`<table>\` in a container with \`overflow-x: auto\`. A wide \`<table>\` left alone will push the document wider than the viewport.
   - **Media is fluid.** \`img, svg, video, iframe { max-width: 100%; height: auto }\` (height auto only for raster — keep aspect ratio for video/iframe with \`aspect-ratio\`).
-  - **Belt and braces:** \`html, body { overflow-x: hidden }\` as a last-resort guard against a stray descendant. Don't rely on this — fix the descendant — but ship with it on.
+  - **Belt and braces:** \`html, body { overflow-x: clip }\` as a last-resort guard against a stray descendant. Use \`clip\`, not \`hidden\`: \`hidden\` makes the body a scroll container and breaks \`position: sticky\`. Don't rely on this — fix the descendant — but ship with it on.
   - **Tap targets** (links, buttons, summary toggles) ≥44×44px in interactive chrome.
   - Mentally test at **360px** (smallest common phone) and **768px** (tablet) before declaring done. If you have a way to actually render and screenshot, do that — it's the single highest-value check.
   - **Note:** htmlbin appends a small safety stylesheet at the tail of \`<head>\` on every served drop (\`html,body{overflow-x:clip;max-width:100vw}\` plus fluid \`img/svg/video/iframe\` and \`max-width:100%\` on \`<pre>\`/\`<table>\`). It's a floor against the most common break, not a substitute for designing mobile-first. Your drop should look good without it.
 - Semantic HTML — real \`<h1>\`, real \`<details>\`, real \`<table>\` when tabular.
 - \`prefers-color-scheme\` aware (light + dark).
 - Inline \`<style>\`; external deps limited to well-known CDNs (Google Fonts, esm.sh, Tailwind CDN).
-- No fake mac chrome (traffic-light dots etc.) — the htmlbin landing prompt is the *one* product-wide exception; user drops don't get it.
+- No fake window chrome (traffic-light dots etc.) and no fake output. Show the real thing.
 - No stock illustrations, no AI-generated photos.
 - No emoji unless the user's brand uses them.
 - Footer line: small mono, "published via htmlbin.aesir.works". Keep it understated.
@@ -494,9 +512,14 @@ brand_sensing: true
 
 ## What htmlbin won't do (don't suggest these)
 
-- **No login UI, no signup, no email, no dashboard.** The device-code flow is the entire human-facing surface. Don't tell the user to "go to your dashboard" or "sign in" — there is none.
-- **No build pipeline, no SSR, no backend.** HTML uploads exactly as posted. Inline \`<script>\` runs client-side; that's the limit.
-- **No file types other than HTML.** No raw JS endpoints, no image hosting, no JSON serving.
+- **No login UI, no signup, no email, no dashboard.** The device-code
+  flow is the entire human-facing surface. Don't tell the user to "go
+  to your dashboard" or "sign in" — there is none.
+- **No build pipeline, no SSR, no backend.** HTML uploads exactly as
+  posted. Inline \`<script>\` runs client-side; that's the limit.
+- **No file types other than HTML.** No raw JS endpoints, no image
+  hosting, no JSON serving. The viewer iframes the HTML; everything
+  the page needs must be inline or remote.
 
 ## Recommended workflow when invoked
 
@@ -505,7 +528,8 @@ brand_sensing: true
 3. Fetch \`/api/onboard\` once to confirm endpoint shapes for this session.
 4. **If generating new HTML:** pick a pattern (see "Patterns — local first, official as fallback") for structure; apply brand sensing (see "Make it feel like the user's own") for look. Both are floors, not ceilings — the human's prompt wins. Render within the quality floor.
 5. Execute the requested operation (publish / update / list / etc.).
-6. Surface the resulting URL (\`https://htmlbin.aesir.works/p/<slug>\`) to the user as the primary artifact.
+6. Surface the resulting URL (\`https://htmlbin.aesir.works/p/<slug>\`) to the user
+   as the primary artifact.
 `;
 
 const SKILL_DESCRIPTION =

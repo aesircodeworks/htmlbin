@@ -181,7 +181,16 @@ only reachable when the dev sentinel is set — in production it's
 unreachable.** `scripts/agent-e2e.sh` relies on this.
 
 Tokens are stored as `sha256(pepper || token)` where pepper is in env
-(`TOKEN_PEPPER`). Plaintext is never persisted.
+(`TOKEN_PEPPER`). The one place plaintext exists at rest is
+`verifications.api_token`, between the GitHub callback and the agent's
+claiming poll, capped at `CLAIM_TTL_MS` (10 min, `src/auth.ts`). The
+token is only written to `tokens` (and only usable) once the poll claims
+it, via a conditional `UPDATE … WHERE status = 'verified'` so two racing
+polls can't both get it. Unclaimed rows are expired and wiped by the poll
+itself and by `sweepExpiredAuthState()` (run from `/api/auth/start`,
+which also prunes stale `rate_limits` buckets). The callback's own
+`UPDATE … WHERE status = 'pending'` stops a double-submitted sign-in from
+minting a second token.
 
 **Legacy users (pre-OAuth):** `users.github_user_id` is NULLABLE on
 purpose. Existing tokens minted before this change still work, but no
@@ -277,6 +286,19 @@ endpoint and never silently break them.
    sets its own for iframe embedding); CSP `default-src 'none'` on
    JSON. Don't bypass the middleware.
 
+   `/p/:slug/raw`'s CSP includes `sandbox` **without**
+   `allow-same-origin`, so user HTML always runs in an opaque origin —
+   including when opened top-level via the viewer's "raw →" link. Without
+   it a drop's script runs as htmlbin.aesir.works and can `fetch()` other
+   drops' `/raw` with the visitor's unlock cookies. Keep the token list in
+   step with the viewer iframe's `sandbox` attribute.
+
+10. **No HTML or plain-text errors on API paths.** `app.notFound` and
+    `app.onError` in `src/index.ts` answer `/api/*` and `/mcp` with the
+    canonical JSON shape (`not_found`, `internal_error`). `onError`
+    reports to Sentry itself, because handling the error stops it
+    reaching `withSentry`.
+
 ## URL conventions
 
 - Slugs are 9-char base62 random IDs (e.g. `aB3xK7gPq`). No title prefix.
@@ -294,6 +316,15 @@ Every `PUT /api/drops/:slug` with a new `html` body mints a new
 version. Slug + URL never change. The DB has a `versions` table; KV
 keys are `html:<slug>:v<n>`. `drops.latest_version` points at the
 current head.
+
+`drops.version_seq` (migration 0003) is the highest number ever minted
+and never decreases, so deleting a version (even the latest) never frees
+its number for reuse — old `?v=N` links and the per-version OG cache key
+stay truthful. PUT reserves `version_seq + 1` with a compare-and-set
+(`UPDATE … WHERE version_seq = ?`) *before* writing KV; a concurrent PUT
+that loses gets `409 version_conflict` instead of overwriting the
+winner's body. Gaps in the numbering are normal. The 200-version cap
+counts minted numbers (`version_seq`).
 
 `?v=N` query param on the viewer + raw routes pins to a specific
 version. Default = latest.
@@ -348,6 +379,11 @@ overload `passcode` with it.
 SQLite-rename is doable but unnecessary for an internal name, so the
 TypeScript-side mismatch (`Drop.password_hash` / `Drop.password_salt` typed
 fields, snake_case `passcode` on the API) is intentional.
+
+Unlock cookies (`wu_<slug>`) are HMAC'd over `slug|exp|password_hash`,
+so changing or removing the passcode invalidates every outstanding
+unlock. `POST /p/:slug/unlock` is rate limited to 10 attempts / minute
+per IP per drop (passcodes can be 4 chars).
 
 Gate page uses `<input type="text">` + CSS `-webkit-text-security: disc` so
 the value masks like a password field but autofill doesn't fire. A tiny
@@ -659,6 +695,9 @@ never push directly to `main`. Both bypass review.
 
 The workflow:
 
+- **Every run** — the `e2e` job runs `npm run test:e2e:local` (the full
+  agent e2e against a throwaway local Worker with fresh local D1/KV,
+  never production bindings). `deploy` needs it to pass.
 - **PR opened or pushed to** — type-check, `wrangler versions upload`,
   post the Cloudflare preview URL as a sticky comment on the PR
   (`https://<version-id>-htmlbin.<account>.workers.dev`).
@@ -745,6 +784,16 @@ yourself wanting that, stop and ask the user first.
   `migrations/<n>-<name>.sql` and it gets picked up automatically; no
   npm-script edit needed. `npm run db:migrate:list:local` / `:remote`
   shows what's pending.
+  **`schema.sql` already contains every migrated column**, so a DB built
+  from it must not have the migrations re-run (they'd fail on duplicate
+  `ADD COLUMN`). `scripts/setup.mjs` records them in `d1_migrations`
+  when it creates a fresh database; if you build one by hand with
+  `db:apply:*`, do the same. Every migration change also goes into
+  `schema.sql`. **Migrations are not applied by CI** — run
+  `npm run db:migrate:remote` before merging code that needs one (and
+  before testing it on a PR preview, which shares production D1). Write
+  migrations so the *current* production code keeps working once they're
+  applied.
 - **Wrangler invocation in npm scripts.** All `db:*` scripts call
   `node node_modules/wrangler/bin/wrangler.js …` directly rather than
   bare `wrangler`. Why: the `.bin/wrangler` shim is installed as a
@@ -874,6 +923,7 @@ wrangler.toml       ─ Cloudflare config (Worker name, D1, KV, AI, [[rules]] Co
 scripts/
   setup.mjs         ─ provisions D1 + KV, applies schema, sets pepper
   agent-e2e.sh      ─ full functional test
+  e2e-local.sh      ─ boots a throwaway local Worker and runs agent-e2e.sh (CI)
   stats.mjs         ─ text-based stats snapshot (npm run stats)
   dashboard/        ─ local-only operator web UI (npm run dashboard)
     server.mjs        ─ http server + wrangler subprocess proxy
@@ -888,8 +938,14 @@ came from an internal Webflow tool and was retired in this codebase.
 ## Testing
 
 ```
-npm run test:e2e
+npm run test:e2e:local   # boots its own throwaway Worker, then runs the suite
+npm run test:e2e         # against a dev server you already have on :8787
 ```
+
+`test:e2e:local` (`scripts/e2e-local.sh`) generates a config under
+`.wrangler/e2e/` with the `[ai]` binding stripped — wrangler only serves
+AI in remote mode, which needs a Cloudflare login — and fresh local
+D1/KV state. It's what CI runs.
 
 Walks discovery → onboarding → device-code auth → MCP → CRUD →
 versioning → context → passcode lifecycle → ownership → cleanup.
@@ -904,8 +960,13 @@ system works.
 - 2 MB / drop (`MAX_HTML_BYTES` in `drops.ts`)
 - 64 KB / context per version
 - 200 versions / drop
-- 60 writes / minute / token
-- 500 writes / day / token
+- 60 writes / minute / account
+- 500 writes / day / account
+
+Write limits are keyed by user id, not token (so minting more tokens
+buys nothing), and every mutating `/api/drops` call counts — POST, PUT,
+PATCH, both DELETEs, and `/passcode` — via `enforceWriteLimits()` in
+`drops.ts`.
 - 500 drops / account
 - 10-min TTL on verification codes
 

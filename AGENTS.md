@@ -58,11 +58,13 @@ Useful checks:
 
 ```bash
 npm run typecheck
-npm run test:e2e
+npm run test:e2e:local
 ```
 
-`npm run test:e2e` expects a dev server at `http://localhost:8787`
-unless `BASE_URL` is overridden.
+`npm run test:e2e:local` boots a throwaway local Worker (fresh D1/KV,
+dev-mock GitHub) and runs the suite; CI runs the same thing.
+`npm run test:e2e` instead expects a dev server at
+`http://localhost:8787` unless `BASE_URL` is overridden.
 
 For meaningful code changes, run `npm run typecheck`. Run the e2e suite
 when API/auth/drop behavior, discoverability, routing, rendering, or
@@ -145,8 +147,10 @@ Device-code flow:
 
 1. `POST /api/auth/start` -> `{code, verification_url, poll_token}`
 2. Human opens `/verify` and signs in with GitHub.
-3. Worker upserts by `github_user_id` and mints a token.
-4. `GET /api/auth/poll?token=...` reveals `{api_token}` exactly once.
+3. Worker upserts by `github_user_id` and mints a token, held in the
+   verification row for at most 10 minutes.
+4. `GET /api/auth/poll?token=...` claims it: reveals `{api_token}`
+   exactly once and only then makes it a valid token.
 5. Later calls, including `POST /mcp`, use `Authorization: Bearer hb_...`.
    The MCP door does not start a browser login.
 
