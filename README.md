@@ -159,7 +159,7 @@ The landing page also sets a `Link:` HTTP header advertising all of the above.
 | `GET`    | `/api/drops/:slug/v/:n` | Specific version metadata + context |
 | `DELETE` | `/api/drops/:slug` | Deletes all versions |
 | `POST`   | `/api/drops/:slug/passcode` | Soft share gate; empty string removes it |
-| `GET`    | `/api/tokens` | List your active tokens (across machines) |
+| `GET`    | `/api/tokens` | List your tokens across machines (revoked ones carry `revoked_at`) |
 | `DELETE` | `/api/tokens/:id` | Revoke a token by short id |
 
 ### Public viewing
@@ -212,8 +212,8 @@ works.
 - 2 MB / drop
 - 64 KB / context per version
 - 200 versions / drop
-- 60 writes / minute / token
-- 500 writes / day / token
+- 60 writes / minute / account
+- 500 writes / day / account (every mutating call counts)
 - 500 drops / account
 - 10-minute TTL on verification codes
 

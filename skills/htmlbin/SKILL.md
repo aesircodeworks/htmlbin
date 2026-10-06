@@ -166,11 +166,11 @@ Returns the full Drop (HTTP 201):
 
 ```json
 {
-  "slug": "aB3xK7g",
+  "slug": "aB3xK7gPq",
   "title": "My page",
   "description": "Optional subtitle",
-  "url": "https://htmlbin.aesir.works/p/aB3xK7g",
-  "raw_url": "https://htmlbin.aesir.works/p/aB3xK7g/raw",
+  "url": "https://htmlbin.aesir.works/p/aB3xK7gPq",
+  "raw_url": "https://htmlbin.aesir.works/p/aB3xK7gPq/raw",
   "locked": false,
   "latest_version": 1,
   "view_count": 0,
@@ -192,7 +192,10 @@ curl -s -X PUT "https://htmlbin.aesir.works/api/drops/<slug>" \
 ```
 
 **PUT requires `html`.** The slug never changes; `latest_version`
-increments. Old versions remain at `/p/<slug>?v=N`. Returns the full Drop.
+increments. Old versions remain at `/p/<slug>?v=N`, and a version number
+is never reused, even after that version is deleted. Returns the full Drop.
+If another update to the same drop lands at the same moment, PUT returns
+`409 version_conflict` — re-fetch and retry.
 The MCP tool is `update_drop`.
 
 ### Update title/description/metadata only (PATCH)
@@ -362,10 +365,12 @@ be strings — stringify numbers and booleans agent-side.
 ## Rate limiting
 
 429 responses carry a `Retry-After` header and `details.retry_after_seconds`.
-Codes:
+Write limits are per account (every token for the same GitHub identity
+shares them). Every mutating call counts: POST, PUT, PATCH, DELETE, and
+setting a passcode. Codes:
 
-- `rate_limited` — 60 writes/min/token
-- `daily_quota_exceeded` — 500 writes/day/token
+- `rate_limited` — 60 writes/min/account
+- `daily_quota_exceeded` — 500 writes/day/account
 - `quota_exceeded` — 500 drops/account
 - `version_limit_reached` — 200 versions/drop
 
@@ -376,8 +381,8 @@ Read live values from `/api/onboard.limits`; current defaults:
 - 2 MB / drop body
 - 64 KB / context per version
 - 200 versions / drop
-- 60 writes / minute / token
-- 500 writes / day / token
+- 60 writes / minute / account
+- 500 writes / day / account
 - 500 drops / account
 - 10-min TTL on verification codes
 
@@ -387,7 +392,7 @@ Read live values from `/api/onboard.limits`; current defaults:
 - Specific version: `https://htmlbin.aesir.works/p/<slug>?v=<n>`
 - Raw HTML (no chrome): `https://htmlbin.aesir.works/p/<slug>/raw`
 - Per-drop OG card: `https://htmlbin.aesir.works/p/<slug>/og.svg` (or `.png`)
-- Slugs are 7-char base62: `^[A-Za-z0-9]{7}$`
+- Slugs are 9-char base62 (older drops may be 6–12): `^[A-Za-z0-9]{6,12}$`
 - Tokens are `hb_` + base62: `^hb_[A-Za-z0-9]+$`
 
 ## Quality floor
@@ -402,14 +407,14 @@ These apply to every drop regardless of pattern or brand context. They're not pl
   - **`<pre>` / code blocks must not set page width.** Two acceptable patterns: (a) `white-space: pre-wrap; overflow-wrap: anywhere` for short snippets where wrapping is fine, or (b) `overflow-x: auto; max-width: 100%` on the `<pre>` itself for code where line breaks matter (the block scrolls internally, the page doesn't). Pick one per block; never let a `<pre>` push the body wider.
   - **Tables don't set page width either.** Under 640px, either restyle as stacked rows (`table, tbody, tr, td { display: block }` with per-cell labels) or wrap the `<table>` in a container with `overflow-x: auto`. A wide `<table>` left alone will push the document wider than the viewport.
   - **Media is fluid.** `img, svg, video, iframe { max-width: 100%; height: auto }` (height auto only for raster — keep aspect ratio for video/iframe with `aspect-ratio`).
-  - **Belt and braces:** `html, body { overflow-x: hidden }` as a last-resort guard against a stray descendant. Don't rely on this — fix the descendant — but ship with it on.
+  - **Belt and braces:** `html, body { overflow-x: clip }` as a last-resort guard against a stray descendant. Use `clip`, not `hidden`: `hidden` makes the body a scroll container and breaks `position: sticky`. Don't rely on this — fix the descendant — but ship with it on.
   - **Tap targets** (links, buttons, summary toggles) ≥44×44px in interactive chrome.
   - Mentally test at **360px** (smallest common phone) and **768px** (tablet) before declaring done. If you have a way to actually render and screenshot, do that — it's the single highest-value check.
   - **Note:** htmlbin appends a small safety stylesheet at the tail of `<head>` on every served drop (`html,body{overflow-x:clip;max-width:100vw}` plus fluid `img/svg/video/iframe` and `max-width:100%` on `<pre>`/`<table>`). It's a floor against the most common break, not a substitute for designing mobile-first. Your drop should look good without it.
 - Semantic HTML — real `<h1>`, real `<details>`, real `<table>` when tabular.
 - `prefers-color-scheme` aware (light + dark).
 - Inline `<style>`; external deps limited to well-known CDNs (Google Fonts, esm.sh, Tailwind CDN).
-- No fake mac chrome (traffic-light dots etc.) — the htmlbin landing prompt is the *one* product-wide exception; user drops don't get it.
+- No fake window chrome (traffic-light dots etc.) and no fake output. Show the real thing.
 - No stock illustrations, no AI-generated photos.
 - No emoji unless the user's brand uses them.
 - Footer line: small mono, "published via htmlbin.aesir.works". Keep it understated.
