@@ -305,6 +305,11 @@ curl -s -X POST "$BASE/mcp" -H "Authorization: Bearer $TOKEN" "${MCP_HEADERS[@]}
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' -o "$TMP/mcp-tools.json"
 assert_contains "$(cat "$TMP/mcp-tools.json")" "create_drop" "MCP tools/list includes create_drop"
 
+MPV=$(curl -s -D - -o /dev/null -X POST "$BASE/mcp" -H "Authorization: Bearer $TOKEN" \
+  "${MCP_HEADERS[@]}" -H "MCP-Protocol-Version: 2025-06-18" \
+  -d '{"jsonrpc":"2.0","id":4,"method":"ping"}' | tr -d '\r' | grep -i '^mcp-protocol-version:')
+assert_contains "$MPV" "2025-06-18" "MCP echoes the negotiated MCP-Protocol-Version header after initialize"
+
 curl -s -X POST "$BASE/mcp" -H "Authorization: Bearer $TOKEN" "${MCP_HEADERS[@]}" \
   -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"whoami","arguments":{}}}' \
   -o "$TMP/mcp-who.json"
@@ -345,6 +350,8 @@ assert_contains "$RAW" "data-htmlbin-safety" "raw HTML carries the mobile safety
 assert_contains "$RAW" "name=\"viewport\"" "raw HTML gets a viewport meta injected when missing"
 RC=$(curl -s -o /dev/null -w "%{content_type}" "$BASE/p/$SLUG/raw")
 assert_contains "$RC" "text/html" "raw is served as text/html"
+RCSP=$(curl -s -D - -o /dev/null "$BASE/p/$SLUG/raw" | tr -d '\r' | grep -i '^content-security-policy:')
+assert_contains "$RCSP" "sandbox allow-scripts" "raw is sandboxed (opaque origin) even when opened top-level"
 
 curl -s "$BASE/api/drops/$SLUG" -H "Authorization: Bearer $TOKEN" -o "$TMP/meta.json"
 assert_json "$TMP/meta.json" '.slug' "$SLUG" "GET /api/drops/:slug returns own metadata"
@@ -362,6 +369,18 @@ jq -n '{html:"<h1>updated by agent</h1>"}' \
 assert_json "$TMP/updated.json" '.slug' "$SLUG" "PUT /api/drops/:slug returns slug"
 RAW2=$(curl -s "$BASE/p/$SLUG/raw")
 assert_contains "$RAW2" "updated by agent" "raw HTML reflects update"
+
+# Version numbers are never reused: delete the latest (v2), then PUT again.
+# The new version must be v3, not a second v2.
+curl -s -X DELETE "$BASE/api/drops/$SLUG/v/2" -H "Authorization: Bearer $TOKEN" -o "$TMP/delv2.json"
+assert_json "$TMP/delv2.json" '.latest_version' '1' "deleting the latest version rolls latest_version back"
+jq -n '{html:"<h1>updated by agent again</h1>"}' \
+| curl -s -X PUT "$BASE/api/drops/$SLUG" \
+    -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+    -d @- -o "$TMP/updated3.json"
+assert_json "$TMP/updated3.json" '.latest_version' '3' "PUT after deleting v2 mints v3 (numbers never reused)"
+GONE_V2=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/p/$SLUG/raw?v=2")
+assert_eq "$GONE_V2" "404" "deleted v2 stays gone"
 
 # ---------------------------------------------------------------------------
 section "4b. metadata — owner-side tag bag + lookup-then-mutate"
@@ -498,6 +517,23 @@ assert_contains "$WRAW" "updated by agent" "with cookie, raw HTML loads"
 NOCOOKIE=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/p/$SLUG/raw")
 assert_eq "$NOCOOKIE" "302" "without cookie, still locked"
 
+# Changing the passcode revokes unlocks issued under the old one.
+curl -s -X POST "$BASE/api/drops/$SLUG/passcode" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"passcode":"e2e-secret-2"}' -o /dev/null
+STALE=$(curl -s -o /dev/null -w "%{http_code}" -b "$TMP/cookies" "$BASE/p/$SLUG/raw")
+assert_eq "$STALE" "302" "old unlock cookie stops working after the passcode changes"
+
+# Passcode guesses are rate limited (10/min per client per drop). Two
+# attempts were spent above; burn the rest, then expect a 429.
+for _ in 1 2 3 4 5 6 7 8; do
+  curl -s -o /dev/null -X POST "$BASE/p/$SLUG/unlock" \
+    -H "Content-Type: application/x-www-form-urlencoded" --data-urlencode "passcode=nope"
+done
+RL=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/p/$SLUG/unlock" \
+  -H "Content-Type: application/x-www-form-urlencoded" --data-urlencode "passcode=nope")
+assert_eq "$RL" "429" "unlock attempts are rate limited"
+
 curl -s -X POST "$BASE/api/drops/$SLUG/passcode" \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"passcode":""}' -o "$TMP/unlock.json"
@@ -549,6 +585,14 @@ MBAD=$(curl -s -X POST "$BASE/api/drops" \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"title":"x"}')
 assert_contains "$MBAD" "html_required" "missing html rejected"
+
+PSHORT=$(curl -s -X POST "$BASE/api/drops" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"title":"x","html":"<h1>x</h1>","passcode":"ab"}')
+assert_contains "$PSHORT" "passcode_too_short" "POST /api/drops rejects a passcode < 4 chars"
+
+curl -s "$BASE/api/no-such-endpoint" -H "Authorization: Bearer $TOKEN" -o "$TMP/api404.json"
+assert_json "$TMP/api404.json" '.error.code' 'not_found' "unknown /api route returns the JSON error shape"
 
 ISL=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/p/!!")
 assert_eq "$ISL" "404" "invalid slug → 404"

@@ -18,7 +18,8 @@
     "stats": "node scripts/stats.mjs",
     "dashboard": "node scripts/dashboard/server.mjs",
     "typecheck": "tsc --noEmit",
-    "test:e2e": "BASE_URL=http://localhost:8787 ./scripts/agent-e2e.sh"
+    "test:e2e": "BASE_URL=http://localhost:8787 ./scripts/agent-e2e.sh",
+    "test:e2e:local": "./scripts/e2e-local.sh"
   },
   "dependencies": {
     "@resvg/resvg-wasm": "^2.6.2",

@@ -16,7 +16,26 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Full agent e2e (scripts/agent-e2e.sh) against a throwaway local Worker
+  # with fresh local D1/KV — never production bindings. Gates both the PR
+  # preview upload and the production deploy.
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: End-to-end test against a local Worker
+        run: npm run test:e2e:local
+
   deploy:
+    needs: e2e
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
