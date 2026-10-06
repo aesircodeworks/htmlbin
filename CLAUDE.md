@@ -1,0 +1,919 @@
+# CLAUDE.md — htmlbin
+
+Quick-reference for any future Claude Code session in this repo. The
+deep dive on visual design lives in [DESIGN.md](./DESIGN.md); this file
+is the operating manual.
+
+## What this is
+
+**htmlbin** — agent-first HTML hosting. Pastebin-energy product. An agent
+does a one-time human-verified device-code dance, then publishes
+self-contained HTML to a public URL. No human after auth. Live at
+**htmlbin.aesir.works**.
+
+Public reinvention of an internal Webflow tool ("wrop"). The Webflow
+codebase lives at `/Users/utkarshsengar/dev/prototypes/Prototypes` for
+reference only — none of it ships in the public version.
+
+Agents call the HTTP API or `POST /mcp`. Both doors take the same
+`Authorization: Bearer hb_…` token. GitHub happens once, at `/verify`,
+when that token is minted. `/mcp` does not open a browser login and
+does not publish OAuth discovery metadata.
+
+## Stack (and why)
+
+- **Cloudflare Workers + Hono** — single Worker, no Next.js.
+  User explicitly asked for pure Cloudflare. Hono is the lightest
+  Workers framework. Don't reach for Next.js.
+- **D1** — relational data (users, tokens, drops, versions, reports).
+- **KV** — HTML bodies, keyed by `html:<slug>:v<n>`.
+- **GitHub OAuth** — single human checkpoint during device-code auth.
+  Replaced Turnstile in May 2026 (see "Auth model" below) so identity
+  is bound to a UNIQUE `github_user_id` and cycling tokens no longer
+  resets quotas. GitHub is an identity provider, not a paid SaaS — the
+  Worker talks directly to `github.com/login/oauth/*`.
+- **Web Crypto** — PBKDF2/HMAC. Not Node crypto.
+
+## Hard rules from the user
+
+These came up across sessions and are not preferences — violating any of
+them ships something the user will reject:
+
+1. **Don't clone competitors.** The user pointed at getadb.com for "vibe";
+   an early landing borrowed too literally. The user called it out as
+   unethical. *Take sensibility, invent composition.* Same applies to
+   any future reference shared — including **traces.com**, which is the
+   closest thing to a direct competitor (session sharing for coding
+   agents), so its composition is especially off-limits.
+2. **Don't over-index on Cloudflare.** It's an implementation detail.
+   Internal code comments can name Cloudflare; user-facing copy cannot.
+   No "powered by", no "edge:", no platform names in the UI.
+3. **No Webflow.** Off-limits in the public version.
+4. **Don't add signup/login/email/dashboard.** The device-code flow is
+   the entire UX. Adding auth surfaces breaks the product thesis.
+   *Documented exception:* GitHub OAuth lives inside the device-code
+   verify step (May 2026) — it replaces Turnstile, doesn't add a new
+   surface. There is still no email, no password, no dashboard, no
+   account page. Sign-in happens once at `/verify` and the agent flow
+   is unchanged from its side. Do not extend this exception to add a
+   user-facing account UI.
+5. **Don't introduce a new keyword (formerly "HTMD").** The product is
+   called htmlbin; the artifact is "a drop"; "drop" is just casual
+   English, not a coined term we own. We do not have authority to define
+   a new format spec, so don't act like we do.
+6. **Aesthetic stays in DESIGN.md.** Don't drift.
+7. **Never deploy to production directly.** No `wrangler deploy` from
+   the local shell. No `git push origin main`. Every change ships
+   through this exact flow:
+     1. Create a new branch (`git checkout -b <name>`).
+     2. Commit and `git push -u origin <name>`.
+     3. Open a PR. GitHub Actions runs `wrangler versions upload` and
+        posts a Cloudflare preview URL as a sticky comment on the PR.
+     4. Test against that preview URL. Wait for the user's approval.
+     5. After the user approves, merge the PR. The merge-to-`main`
+        workflow runs `wrangler deploy` for production — that is the
+        only path code reaches `htmlbin.aesir.works`.
+   Even for a one-line copy fix. No exceptions.
+
+## Naming history (so future sessions don't relitigate)
+
+The brand evolved: `wrop` (internal Webflow tool) → `htmd` (early public
+attempt with the "HTMD = HyperText Markup Document" framework) →
+**`htmlbin`** (current). The framework was dropped because real-user
+feedback (Allan in the user's Slack) said `htmlbin.aesir.works` lands faster than
+`htmd.sh` — too much explanation tax for "trying to be an HTML-like
+standard." The product can be a clear pastebin-for-agents without owning
+a category.
+
+Token prefix is **`hb_`** (short for htmlbin).
+
+## Design — one-liner
+
+Geist + Geist Mono, single red accent (`#D93025`, Gmail/Google red),
+monochrome dark code blocks. **Two surfaces, deliberately different —
+read [DESIGN.md](./DESIGN.md) §0 before touching either:**
+
+- **Landing (`/`)** — a real marketing page. Tinted `#F4F5F6` surface
+  with a dot texture, centred 1080px shell, product nav with one solid
+  button, all-black display headline (never an accent-coloured word), and
+  a real drop embedded in an iframe as evidence above the fold. Classes
+  are `.l*` or scoped to `body.landing`.
+- **App chrome (`/verify`, `/p/:slug`, gate, 404)** — a document. Pure
+  white, left-aligned 720px column, vim-modeline breadcrumb, and the
+  HTTP-style memo (a real `<details open>`) as the first thing on the
+  page. Unprefixed classes, so editing one reaches all of these.
+
+**No fake window chrome anywhere any more.** The traffic-light dots on
+the old prompt block were a sanctioned exception; that exception is
+withdrawn. Related and broader: no fake *output* of any kind — the
+landing shows a literal trimmed `GET /api/onboard` response rather than
+a stylised drawing of one, because the old memo rendered `to:`/`from:`/
+`re:` as HTTP headers when they are actually RFC 5322 email headers.
+
+**Single source of truth:** [`src/styles.ts`](./src/styles.ts) →
+served at `/style.css`. Every view imports `STYLE_HREF` (=
+`/style.css?v=<short-hash>`) from that file — the hash auto-bumps on any
+CSS edit, so the edge cache busts on deploy without a manual version
+change. Per-page overrides should stay tiny. Don't hard-code
+`/style.css` in new views; import the constant.
+
+**Landing content lives in `src/views/landing.ts`:**
+
+- `EXAMPLES` — the hand-curated "a few pages people have published" list.
+- One clipboard payload, built inside `landingPage` from `PUBLIC_URL`.
+  One `<pre>`. No prompt tabs.
+- `SHOWCASE_SLUG` — the drop embedded as evidence. Uses `/p/<slug>/raw`,
+  which does **not** bump `view_count`, so homepage traffic doesn't
+  inflate that drop's counter. No fallback: delete the drop and the
+  frame goes blank.
+- `src/views/logos.ts` — inlined agent brand marks. Only ship a mark
+  whose identity you verified against the source asset; that file
+  documents which products are deliberately text-only and why.
+
+**Copy has a spec now** — see DESIGN.md §9 for voice and word budgets
+(headline 5–10 words, lede 12–15). Every CTA needs a verb.
+
+The full design doc with rationale, components, and don'ts is in
+[DESIGN.md](./DESIGN.md).
+
+## Auth model — agent-first device-code flow
+
+Modeled on OAuth device-code (think `gh auth login`):
+
+1. `POST /api/auth/start` → `{code, verification_url, poll_token}`
+2. Agent prints code + URL to human
+3. Human opens URL, signs in with **GitHub** — we ask for `read:user`
+   only (public username + numeric id). The Worker upserts a user row
+   by `github_user_id` (UNIQUE) and mints a token in the same callback.
+4. `GET /api/auth/poll?token=…` → `{api_token}` revealed exactly once
+5. `Authorization: Bearer hb_…` thereafter
+
+**Why GitHub, not Turnstile:** Turnstile only proved a human was on the
+page. It did nothing about the same human re-running the flow forever
+to mint fresh tokens. Binding accounts to a UNIQUE `github_user_id`
+means cycling tokens recycles the same account — quotas and drops
+stick. Creating a second GitHub account has real friction (rate limits,
+email verification, account age) which is the point.
+
+**Cross-machine:** sign in with the same GitHub account on the new
+device. The callback finds the existing user by `github_user_id` and
+mints a new token attached to the same `user_id`. The old "paste an
+existing hb_… token" UX was deleted in the same change.
+
+**Routes:** `/auth/github/start` and `/auth/github/callback` live in
+`src/github-oauth.ts`. State binding to the verification row uses the
+verify code as the OAuth `state` param — it's already a short-lived,
+single-use secret. The callback re-checks `verifications.status` after
+GitHub returns, in case the row expired during the round-trip.
+
+**Bindings:** `GITHUB_CLIENT_ID` is a public `[vars]` entry in
+`wrangler.toml`. `GITHUB_CLIENT_SECRET` is a Worker secret
+(`wrangler secret put GITHUB_CLIENT_SECRET`). The OAuth app's
+"Authorization callback URL" must be `https://htmlbin.aesir.works/auth/github/callback`.
+
+**Dev mock:** when `GITHUB_CLIENT_ID === "dev-mock"` (the value in
+`.dev.vars.example`), `/auth/github/start` skips the round-trip to
+github.com and redirects straight to `/auth/github/callback` with a
+synthesized github identity derived from `?mock_login=<x>`. The
+deterministic id (`stableMockId()`) is a SHA-256-based int so two
+different mock logins create two different accounts. **The mock path is
+only reachable when the dev sentinel is set — in production it's
+unreachable.** `scripts/agent-e2e.sh` relies on this.
+
+Tokens are stored as `sha256(pepper || token)` where pepper is in env
+(`TOKEN_PEPPER`). Plaintext is never persisted.
+
+**Legacy users (pre-OAuth):** `users.github_user_id` is NULLABLE on
+purpose. Existing tokens minted before this change still work, but no
+new account can be created with `github_user_id = NULL`. The UNIQUE
+index uses a partial-index `WHERE github_user_id IS NOT NULL` so the
+legacy rows don't collide.
+
+**Token storage convention (agent-side):**
+1. `./.htmlbin/token` — project-local, preferred (no permission prompt for
+   agents that won't write outside cwd)
+2. `HTMLBIN_TOKEN` env var
+3. `~/.config/htmlbin/token` — machine-global fallback
+
+`./.htmlbin/token` is the primary. The protocol descriptor at
+`/api/onboard` advertises this order.
+
+## /api/onboard is JSON by default
+
+Default content type is **application/json** — a structured protocol
+descriptor (`auth.steps[]`, `publish`, `iterate`, schemas, limits).
+Markdown variant is opt-in via `Accept: text/markdown` or
+`?format=md`.
+
+Why: "fetch a URL and follow what it returns" is the shape of a
+prompt-injection payload, and agents (rightly) refuse it. A structured
+descriptor reads as data, not as instructions, and slips through the
+same agents without friction. The recommended user prompt on the
+landing page no longer says "follow what it returns" — it directly
+lists the three endpoints and the token path.
+
+`buildOnboardJson()` and `buildOnboardText()` both live in `onboard.ts`
+and must stay in sync when the protocol changes.
+
+## API design conventions (locked pre-launch)
+
+Reviewed against the `api-and-interface-design` skill (Hyrum's Law,
+contract-first, etc.). These are the rules — apply them on every new
+endpoint and never silently break them.
+
+1. **snake_case for every field name.** Request and response. Examples:
+   `raw_url`, `latest_version`, `created_at`, `view_count`, `is_latest`,
+   `retry_after_seconds`. Deliberate choice — agent-first APIs (parsed,
+   not destructured in JS) read better in snake_case, matching Stripe /
+   GitHub.
+
+2. **One error shape — and only one.** Every 4xx/5xx response uses
+   `src/errors.ts` → `apiError(c, code, message, status, details?)`:
+
+   ```jsonc
+   {
+     "error": {
+       "code": "<machine_readable_snake_case>",
+       "message": "<human readable>",
+       "details"?: { /* optional context */ }
+     }
+   }
+   ```
+
+   Agents switch on `error.code`. The set of valid codes is the
+   `ErrorCode` union in `src/errors.ts`.
+
+3. **Mutating endpoints return the full Drop** (`serializeDrop()` in
+   `drops.ts`). Consumers should never have to re-fetch. The one
+   exception is full-drop `DELETE`, which returns `204 No Content`.
+
+4. **PUT vs PATCH split.** `PUT /api/drops/:slug` mints a new version
+   and requires `html`. `PATCH /api/drops/:slug` updates metadata only
+   (title / description) and forbids `html` (`400 metadata_only_on_patch`).
+
+5. **List endpoints paginate.** `GET /api/drops` accepts `page`,
+   `pageSize` (max 200), `sortBy`, `sortOrder` and returns
+   `{ data, pagination }`.
+
+6. **429 carries `Retry-After`.** Both header (RFC 9110) and
+   `details.retry_after_seconds` in the body. Quota errors
+   (`quota_exceeded`, `daily_quota_exceeded`, `version_limit_reached`)
+   are 429, not 403.
+
+7. **HEAD support on read endpoints.** `app.on(["GET", "HEAD"], …)`
+   everywhere. Agents and CDNs probe with HEAD.
+
+8. **CORS is intentionally NOT set.** htmlbin is an agent-side API
+   (server-side scripts and agent runtimes). Disallowing browser cross-origin XHR
+   is a *feature* — random third-party sites can't `fetch(htmlbin.aesir.works
+   /api/…)` with the user's token. Don't "fix" missing CORS without
+   talking to the user. If a browser-based agent ever needs access,
+   that's a conscious decision, not a copy-paste of `app.use(cors())`.
+
+9. **Security headers on every response.** A global middleware in
+   `src/index.ts` sets HSTS, X-Content-Type-Options, Referrer-Policy,
+   Permissions-Policy on every response; X-Frame-Options + CSP on
+   text/html (unless the handler already set CSP — `/p/:slug/raw`
+   sets its own for iframe embedding); CSP `default-src 'none'` on
+   JSON. Don't bypass the middleware.
+
+## URL conventions
+
+- Slugs are 9-char base62 random IDs (e.g. `aB3xK7gPq`). No title prefix.
+  `isValidSlug()` accepts 6–12 chars so older shorter IDs still work.
+- Drop URL: `htmlbin.aesir.works/p/aB3xK7gPq`
+- Specific version: `htmlbin.aesir.works/p/aB3xK7gPq?v=2`
+- Raw HTML: `htmlbin.aesir.works/p/aB3xK7gPq/raw`
+
+If you change the slug generator, also update the validation regex in
+`src/slug.ts` and the e2e test expectations.
+
+## Versioning
+
+Every `PUT /api/drops/:slug` with a new `html` body mints a new
+version. Slug + URL never change. The DB has a `versions` table; KV
+keys are `html:<slug>:v<n>`. `drops.latest_version` points at the
+current head.
+
+`?v=N` query param on the viewer + raw routes pins to a specific
+version. Default = latest.
+
+## Mobile safety net (injected into every served drop)
+
+The skill in `skills/htmlbin/SKILL.md` tells agents to author mobile-safe
+HTML, but the skill is advisory. The guard is `src/safety-net.ts` →
+`injectMobileSafetyNet()`, called from the `/p/:slug/raw` handler in
+`src/index.ts`. It appends a small `<style data-htmlbin-safety>` at the
+tail of `<head>` and injects a viewport meta if the drop didn't ship
+one. CSS is intentionally tiny:
+
+```
+html,body{max-width:100vw;overflow-x:clip}
+img,svg{max-width:100%;height:auto}
+video,iframe{max-width:100%}
+pre,table{max-width:100%}
+pre{overflow-x:auto}
+```
+
+Why this is OK to modify user content (we've otherwise been strict
+about "we don't touch /p/:slug/raw — that's the user's content"): the
+appended rules only ever clamp a layout that would have horizontally
+scrolled the body. No drop legitimately wants horizontal scroll on
+`<body>`. `overflow-x: clip` (not `hidden`) so we don't create a scroll
+container that breaks `position: sticky` descendants.
+
+If you ever change the CSS in `safety-net.ts`, also update:
+
+- `src/onboard.ts` → `recommendations.mobile_floor.server_safety_net`
+  (the prose that tells agents what we inject).
+- `skills/htmlbin/SKILL.md` + `src/skill.ts` mobile-floor "Note" bullet.
+
+The e2e test asserts both `data-htmlbin-safety` and the injected
+`name="viewport"` are present on `/p/:slug/raw`.
+
+## Passcode (soft share gate)
+
+Drops can be gated by a **passcode** (renamed from "password" in May 2026 —
+1Password autofill kept triggering on `type="password"` and the credential
+framing oversold what it actually is). The API field is `passcode`, endpoint
+is `POST /api/drops/:slug/passcode`, error codes are `passcode_required` and
+`passcode_too_short`.
+
+It's a *share gate, not encryption*. The HTML body sits in KV unencrypted;
+the gate only blocks the viewer route and the signed unlock cookie. If you
+ever add a "real" zero-knowledge tier, that's a different surface — don't
+overload `passcode` with it.
+
+**Internal DB columns are still `password_hash` and `password_salt`** —
+SQLite-rename is doable but unnecessary for an internal name, so the
+TypeScript-side mismatch (`Drop.password_hash` / `Drop.password_salt` typed
+fields, snake_case `passcode` on the API) is intentional.
+
+Gate page uses `<input type="text">` + CSS `-webkit-text-security: disc` so
+the value masks like a password field but autofill doesn't fire. A tiny
+inline script flips text-security on a "show/hide" toggle.
+
+## Context metadata
+
+Each version can carry an optional `context` field (text, ≤64KB) — the
+agent's reasoning trace, prompt, or thinking that produced the version.
+The viewer exposes it under a discreet "context" disclosure when present.
+**Opt-in per request — agents must only include it when the human has
+agreed; it can be sensitive.**
+
+## Drop metadata (owner-side tag bag)
+
+Each drop carries a `metadata` field: a flat `Record<string,string>`
+stored as a JSON `TEXT` column on `drops`. **Free-form** — agents tag
+drops with whatever they need to find them by later. Set on `POST`,
+replace on `PUT`/`PATCH`, filter via `GET /api/drops?metadata.<key>=<value>`
+(AND across pairs). **Owner-only — the public viewer never exposes it.**
+
+Examples of what an agent might tag (illustrative, not prescriptive —
+the server has no opinion about your keys):
+
+- `{repo: "foo/bar", pr: "42"}` — stable preview URL across CI pushes
+  for one PR.
+- `{session_id: "<chat-id>", kind: "deck"}` — the slide deck this
+  conversation produced, so the next turn can iterate on the same drop.
+- `{client: "acme", project: "rebrand", status: "draft"}` — an agent
+  maintaining a portfolio of in-progress artifacts for one end-user.
+- `{kind: "spec", topic: "auth-rewrite"}` — buckets so the agent can
+  later list all of one kind.
+
+Drop-level, not version-level. Like `title` on `drops`, only the current
+value is kept; `versions` carries HTML history only. No per-version
+metadata snapshot. If an agent wants per-version tags, it already has
+`context` for that.
+
+Replace-whole semantics on `PUT`/`PATCH`: absent → leave untouched, `{}`
+→ clear, `{k:v}` → overwrite the whole map. Validated in `drops.ts` via
+`validateMetadata()`: ≤10 keys, ≤64 chars per key, ≤256 chars per
+value, key regex `/^[a-z0-9_]([a-z0-9_.-]*[a-z0-9_])?$/i`. Values must
+be strings — no nested objects, arrays, or non-string scalars. All
+violations: `400 invalid_arg`. **No reserved keys** — convention only.
+
+**Lookup-then-mutate** is the canonical recipe whenever an agent needs
+to find or update a drop it tagged earlier:
+
+1. `GET /api/drops?metadata.<k1>=<v1>&metadata.<k2>=<v2>`
+2. If a drop matches: `PUT /api/drops/<slug>` (mints a new version on
+   the same URL).
+3. If nothing matches: `POST /api/drops` with the same `metadata`.
+
+This is "Pattern 2" — server-generated IDs + metadata lookup, the
+model used by GitHub Releases, Notion, Linear, and Terraform Cloud.
+For the CI / PR-preview shape specifically, two parallel runs can race
+the GET. Serialize at the call site, for example with GitHub Actions
+`concurrency: group: pr-${{ github.event.pull_request.number }}`.
+Other shapes have their own concurrency stories (sessions
+are usually sequential, portfolio updates rarely race) — handle
+race-safety at the call site, not the API.
+
+**We deliberately did NOT ship a `POST /api/drops/upsert` or
+`?if_exists=replace` query flag.** No HTTP-API precedent except
+Salesforce; Stripe explicitly avoided it. If real race rates ever bite
+users, add it later as a thin convenience over the same primitives.
+
+Filter SQL: `AND json_extract(metadata, '$.<key>') = <value>` bound as
+parameters in `listDropsByUser` (`src/db.ts`). The path and value are
+both bound — no string interpolation against user input. No filter
+index in v1; D1 scale is small and the existing `WHERE user_id = ?`
+selectivity is more than enough.
+
+Public viewer (`/p/:slug`) does not render or leak metadata. If you
+ever expose it, that's a deliberate product change — talk to the user
+first.
+
+## Markdown for agents
+
+The landing page is also available as Markdown via Workers AI:
+
+- `GET /index.md` — explicit URL
+- `GET /` with `Accept: text/markdown` — content negotiation
+- `GET /?format=md` — querystring fallback
+
+Result is cached in KV (`md:landing`, 1h). Requires Workers AI binding
+(`[ai]` block in wrangler.toml — already set up). See
+https://blog.cloudflare.com/markdown-for-agents/ for the underlying API.
+
+User-uploaded drops at `/p/:id` are **not** auto-converted — agents
+own their HTML; the markdown variant is only for our own pages.
+
+## Discoverability surfaces (one contract)
+
+These endpoints exist for agents and crawlers; treat them as a single
+contract — when you add or rename a public surface, update **all** of
+them in the same change so they don't drift:
+
+- `GET /api/onboard` — JSON descriptor (default), markdown via `Accept`
+- `POST /mcp` — Streamable HTTP. Same bearer token. No OAuth metadata.
+- `GET /openapi.json` — OpenAPI 3.1 spec
+- `GET /.well-known/agent-card.json` — capability descriptor
+- `GET /.well-known/agent-skills/index.json` — Agent Skills Discovery
+  RFC v0.2.0 index. Entry skill is `htmlbin/SKILL.md`, served from
+  `.well-known/agent-skills/htmlbin/SKILL.md`. Skill content lives in
+  `src/skill.ts` (deployed copy) and `skills/htmlbin/SKILL.md`
+  (human-browsable mirror) — they must stay in sync.
+- `GET /.well-known/patterns/index.json` — pattern catalog manifest.
+  Per-pattern markdown at `GET /.well-known/patterns/<name>.md`. See
+  "Patterns" section below.
+- `GET /.well-known/api-catalog` — RFC 9727 `linkset+json`
+- `GET /llms.txt` — agent-friendly site index
+- `GET /robots.txt` — explicit allow-list of GPTBot, ClaudeBot,
+  PerplexityBot, etc.
+- `GET /sitemap.xml`
+- `Link:` HTTP header on `/` advertising all of the above
+
+`src/discoverability.ts` is the source of truth for everything except
+the skill (`src/skill.ts`) and the patterns catalog (`src/patterns.ts`).
+
+## Skill and MCP
+
+One skill ships in this repo, at
+`/.well-known/agent-skills/htmlbin/SKILL.md`. Source lives in
+`src/skill.ts` with `skills/htmlbin/SKILL.md` as the human-browsable
+mirror. They must stay in sync. `POST /mcp` is the other agent door:
+Streamable HTTP, the same `hb_` bearer token, no second GitHub login.
+
+When the protocol changes, update these together:
+
+- `src/onboard.ts` — JSON and markdown
+- `src/skill.ts` and `skills/htmlbin/SKILL.md`
+- `src/discoverability.ts` — agent card, OpenAPI, llms.txt, Link header, sitemap
+- `src/views/landing.ts` — the one prompt
+- `README.md`
+
+## Patterns — pluggable, file-based
+
+Common drop kinds (PR explainers, summary roundups, plan/spec writeups,
+…) are *not* hardcoded in the Worker. They're markdown files. The skill
+teaches agents the convention; the Worker serves the official starter
+pack as a fallback.
+
+**Resolution order (the convention the skill teaches):**
+
+1. `./.htmlbin/patterns/*.md` — project-local (wins).
+2. `~/.config/htmlbin/patterns/*.md` — machine-global (same dir as the
+   token fallback).
+3. Fetch from `https://htmlbin.aesir.works/.well-known/patterns/<name>.md` if
+   nothing is installed locally. List via `/.well-known/patterns/index.json`.
+4. No match → agent freestyles within the quality floor.
+
+**Source of truth and mirror:** the canonical markdown files live in
+`patterns/` at the repo root for human PR review (`patterns/<name>.md`).
+The same content is inlined into `src/patterns.ts` as TypeScript string
+constants because of the wrangler `.md`-import gotcha (see "Bundling
+non-JS assets" below). **When you edit a pattern, edit both files** —
+same arrangement as `src/skill.ts` ↔ `skills/htmlbin/SKILL.md`.
+
+**Adding a new official pattern:** drop a new `patterns/<name>.md`,
+mirror its content into `src/patterns.ts`'s `PATTERNS` array (with a
+`PatternMeta` entry: name, description, triggers), and ship via PR.
+No DB migration, no schema change, no new endpoint — the existing
+`/.well-known/patterns/:filename` route picks it up automatically.
+
+**Prescriptive patterns (structure fixed, not a menu).** Most patterns
+offer 3–5 layout directions and let the agent pick. `session-explainer`
+does not: it mandates one structure, because these pages are only worth
+comparing to each other if they share a shape. Two mechanics support that:
+
+- **A reference skeleton** at `patterns/<name>.template.html`, mirrored
+  into `src/patterns.ts` as a second string constant and referenced from
+  the pattern's front matter (`template: <name>.template.html`). Served
+  by the same route via `getPatternAsset()`, which returns body +
+  content-type so `.md` goes out as `text/markdown` and `.template.html`
+  as `text/html`. `buildPatternIndex()` adds `template_url` for any
+  pattern that declares one, so agents discover it from the index.
+  The template's CSS is split by a marked comment: a **BRAND TOKENS**
+  block the agent adapts, and a **STRUCTURE** block it must not touch.
+- **`brand_scope: colors-only`** alongside `brand_sensing: true` — adapt
+  palette and type, leave the structure alone. A prescriptive pattern and
+  full brand sensing contradict each other; pick one per pattern.
+  **Why a second key rather than `brand_sensing: colors-only`:**
+  `brand_sensing` stays a boolean. Unknown front-matter keys are
+  ignored, so `brand_scope` and `template` stay additive. Keep new
+  pattern metadata additive for that reason.
+
+Enforcement tops out there on purpose. The server does **not** validate
+published HTML (that would break "HTML uploads exactly as posted"), and
+`./.htmlbin/patterns/` still overrides the official catalog. The pattern
+carries a conformance checklist for the agent to self-check instead.
+
+Agents fetch the catalog from the Worker when nothing is installed
+locally. The template is served beside the markdown. Project-local
+files in `./.htmlbin/patterns/` still win.
+
+## OG card rendering (PNG)
+
+Slack, Twitter, iMessage, and most unfurlers don't render SVG OG cards
+— they need PNG. `src/views/og-png.ts` produces 1200×630 PNGs via
+**satori + resvg-wasm** inside the Worker:
+
+- `GET /og.png` — landing card (red-bracket `<htmlbin>` wordmark)
+- `GET /p/:slug/og.png` — per-drop card (title up top, mono caption
+  with the slug)
+
+WASM gotchas (don't relitigate):
+- Workers block `WebAssembly.compile`. We use `satori/standalone` and
+  call `init(yogaWasmModule)` with a precompiled `WebAssembly.Module`
+  imported via wrangler's `[[rules]] type = "CompiledWasm"` glob. Same
+  trick for `@resvg/resvg-wasm/index_bg.wasm`.
+- `satori-html` was removed because it doesn't decode HTML entities
+  (the `<htmlbin>` wordmark rendered literally as `&lt;htmlbin&gt;`).
+  We build the satori AST directly with small `el/div/span` helpers and
+  real `<` / `>` characters as text children.
+- Geist + Geist Mono are fetched once from jsDelivr `@fontsource/geist`,
+  cached in module memory, then bundled into a single KV blob
+  (`og-fonts:v1`) so cold starts only do the network fetch once per
+  edge node lifetime.
+- Rendered PNGs are KV-cached per slug+version
+  (`og-png:<slug>:v<n>:<rev>`) and per landing
+  (`og-png:landing:v<rev>`). Bump the `:rev` suffix to invalidate.
+- If satori or resvg fail at request time, the route redirects to the
+  SVG variant so social cards never hard-fail. `?debug=1` on the route
+  surfaces the underlying error.
+
+`og-image.ts` (SVG) and `og-png.ts` are **both** in tree on purpose:
+the SVG is the lightweight fallback + per-tab rendering source; the
+PNG is what social platforms actually consume.
+
+## Bundling non-JS assets in the Worker — the wrangler gotcha
+
+**`wrangler 4 + ES module Workers does not reliably honor `[[rules]]`
+for imports of non-JS files outside `src/`.`** We've now hit this twice:
+
+- `import SKILL_MD from "../skills/htmlbin/SKILL.md"` with
+  `[[rules]] type = "Text"` → esbuild reports
+  *"No loader is configured for `.md` files"*.
+- `import geist400 from "../assets/fonts/Geist-400.woff2"` with
+  `[[rules]] type = "Data"` → same error for `.woff2`.
+
+Both worked locally during `wrangler dev` (sometimes) but failed on
+production `wrangler versions upload`. Don't burn time on it again.
+Use one of the two patterns we've already settled on:
+
+| Asset type | Pattern | Where |
+|---|---|---|
+| Markdown / text | Inline as TypeScript template literal | `src/skill.ts`, `src/patterns.ts` |
+| Binary (woff2 etc.) | Base64-inline via a generator script | `src/fonts-data.ts` + `scripts/build-fonts.mjs` |
+
+To add new fonts: drop the `.woff2` into `assets/fonts/`, add it to
+`FILES` in `scripts/build-fonts.mjs`, re-run the script, add an
+`@font-face` entry in `src/fonts.ts`. Workflow is documented inside
+that script.
+
+### The long-term fix: Workers Static Assets
+
+Cloudflare's recommended path for serving static files from a Worker
+is the `[assets]` config block (separate from `[[rules]]`):
+
+```toml
+[assets]
+directory = "./public"
+binding = "ASSETS"
+# Optional: keep specific paths Worker-routed
+# run_worker_first = ["/fonts/*"]
+```
+
+Static files in `./public/` get served at the edge automatically,
+bypass the Worker entirely (faster, smaller bundle, no cold-start
+decode), and integrate cleanly with Hono since they intercept before
+the Worker fires.
+
+We haven't migrated because: (a) the base64 path works today and
+ships ~107 KB total which is comfortably under Worker limits, (b)
+migration requires moving the woff2 files, ripping out
+`src/fonts.ts` + `src/fonts-data.ts`, dropping the `/fonts/:name`
+route handler in `src/index.ts`, and adding a `public/` directory
+served via `[assets]`.
+
+When we do migrate (good follow-up, especially if we ever want to
+serve more static files), the steps:
+
+1. `mv assets/fonts public/fonts`
+2. Add `[assets] directory = "./public"` to `wrangler.toml`
+3. Delete `src/fonts.ts` and `src/fonts-data.ts`
+4. Remove the `/fonts/:name` route + `FONTS` import in `src/index.ts`
+5. Move `FONT_FACE_CSS` into `src/styles.ts` as an inline string
+   (or keep it where it is in a renamed file)
+
+Spec: https://developers.cloudflare.com/workers/static-assets/
+
+## Viewer page title format
+
+`src/views/viewer.ts` formats `<title>` and `og:title` as:
+
+```
+<drop title, truncated to 15 words> - <slug> - htmlbin.aesir.works
+```
+
+`truncateWords()` adds `…` if the title was longer. Both `<title>` and
+`og:title` use the same string so the unfurled card matches the tab.
+
+## CI / continuous deploy — the *only* deploy path
+
+`.github/workflows/deploy.yml` is the **single way** code reaches
+production. Hard rule #7 above: never `wrangler deploy` locally and
+never push directly to `main`. Both bypass review.
+
+The workflow:
+
+- **PR opened or pushed to** — type-check, `wrangler versions upload`,
+  post the Cloudflare preview URL as a sticky comment on the PR
+  (`https://<version-id>-htmlbin.<account>.workers.dev`).
+- **Merge to `main`** — type-check, `wrangler deploy` to production.
+  Triggered by the merge, never by a human running wrangler.
+
+Mandatory loop for every change:
+
+1. `git checkout -b <branch>` from `main`.
+2. Make changes, commit, `git push -u origin <branch>`.
+3. Open a PR. Wait for the CI comment with the preview URL.
+4. Test on the preview URL. Iterate by pushing more commits to the
+   same branch — each push refreshes the same sticky comment.
+5. Hand the preview URL to the user, wait for explicit approval.
+6. Merge the PR → production deploys automatically.
+
+Concurrency cancels superseded PR runs but never cancels a mid-flight
+`main` deploy. The only secret in GitHub is `CLOUDFLARE_API_TOKEN`
+(template "Edit Cloudflare Workers"). Worker secrets (`TOKEN_PEPPER`,
+`GITHUB_CLIENT_SECRET`) are managed via `wrangler secret put` against
+production; preview versions share the same bindings because they
+live on the same Worker.
+
+## Local operator dashboard (`npm run dashboard`) — not a product surface
+
+`scripts/dashboard/server.mjs` is a tiny Node HTTP server that binds to
+`127.0.0.1:5173` and proxies read-only SQL through `wrangler d1 execute
+--remote --json` (same pattern as `stats.mjs`). The static SPA in
+`scripts/dashboard/{index.html,app.js,style.css}` renders an interactive
+overview with click-through into any user (drops, tokens, signup date,
+daily activity) and any drop (versions, owner, storage). User detail
+pulls real name / bio / followers / repos from the public GitHub API.
+
+```
+npm run dashboard            # remote D1
+npm run dashboard -- --local
+```
+
+**Why this is not a hard-rule-#4 violation.** Rule #4 prohibits adding
+a *user-facing* dashboard / account surface to the deployed Worker at
+htmlbin.aesir.works. This is a local dev tool — same shape as `scripts/stats.mjs`,
+just clickable. It binds to 127.0.0.1, lives in `scripts/`, ships
+nothing to KV/D1, and `src/` is untouched. **Do not** turn it into a
+deployed admin route, add a hosted variant, expose it through the
+Worker, or surface anything like it on htmlbin.aesir.works. If you find
+yourself wanting that, stop and ask the user first.
+
+**Implementation notes:**
+
+- Read-only. The server has no SQL mutation path. Inputs are strict
+  whitelists (`user_id` matches `/^[A-Za-z0-9_-]{1,64}$/`, `slug`
+  matches `/^[A-Za-z0-9]{6,12}$/`, window is a fixed enum) before SQL
+  interpolation because `wrangler d1 execute --command` doesn't accept
+  bind params.
+- 30s in-memory query cache so click-around doesn't re-hit remote D1.
+- **Wrangler invocation:** the server runs
+  `node node_modules/wrangler/bin/wrangler.js` directly, *not* `npx
+  wrangler`. The `.bin/wrangler` shim is installed as a regular file
+  (not a symlink), so its `__dirname`-relative path math resolves
+  `node_modules/wrangler-dist/cli.js` (wrong) instead of
+  `node_modules/wrangler/wrangler-dist/cli.js`. `stats.mjs` still uses
+  `npx wrangler`; if that breaks the same way, copy the direct-invoke
+  pattern from the dashboard.
+- Vanilla HTML/JS/CSS, no build step, no new npm dependencies. SVG bar
+  charts hand-rolled.
+- Routes are hash-based: `#/` overview, `#/u/<user_id>` user detail,
+  `#/d/<slug>` drop detail. `/p/<slug>` links in tables open
+  htmlbin.aesir.works (the live drop) in a new tab; drop titles do the same.
+
+## Local dev gotchas
+
+- **GitHub OAuth dev mock.** `.dev.vars` sets
+  `GITHUB_CLIENT_ID=GITHUB_CLIENT_SECRET="dev-mock"`. With that sentinel,
+  `/auth/github/start` skips github.com and redirects straight to the
+  callback with `?mock_login=<x>`. The deterministic mock id derives
+  from SHA-256 of the login. Production uses real OAuth app credentials
+  from `github.com/settings/applications/new`.
+- **D1** in local mode is in `.wrangler/state/`. Run
+  `npm run db:apply:local` after schema changes. For column-only
+  changes against an existing DB, write a new file in `migrations/`
+  and run `npm run db:migrate:local` / `:remote`. The migration scripts
+  call `wrangler d1 migrations apply` under the hood, which tracks
+  applied migrations in a `d1_migrations` table — drop a new
+  `migrations/<n>-<name>.sql` and it gets picked up automatically; no
+  npm-script edit needed. `npm run db:migrate:list:local` / `:remote`
+  shows what's pending.
+- **Wrangler invocation in npm scripts.** All `db:*` scripts call
+  `node node_modules/wrangler/bin/wrangler.js …` directly rather than
+  bare `wrangler`. Why: the `.bin/wrangler` shim is installed as a
+  regular file (not a symlink), so its `__dirname`-relative path math
+  resolves `node_modules/wrangler-dist/cli.js` (wrong) instead of
+  `node_modules/wrangler/wrangler-dist/cli.js`. Same gotcha the
+  dashboard server hit — see `scripts/dashboard/server.mjs`. The
+  `dev`/`deploy`/`tail` scripts kept the bare form because they happen
+  to work; if they ever break the same way, copy the direct-invoke
+  pattern.
+- **Token prefix is `hb_`.** If you change it, update both
+  `src/auth.ts` (regex) AND `src/crypto.ts:newApiToken` AND
+  `src/index.ts` (existing-token validation regex).
+- **Style cache busts itself.** `STYLE_HREF` in `src/styles.ts` is
+  `/style.css?v=<hash-of-css>`; the hash auto-bumps on any CSS edit so
+  you don't need to hard-refresh after a deploy. New views must import
+  the constant rather than hard-coding `/style.css`.
+- **Slack/Twitter unfurl cache.** ~24h TTL per URL. To force a re-fetch
+  during development, append a throwaway query string (`?_=2`).
+- **Cloudflare bot block on the production API.** Requests to
+  `htmlbin.aesir.works/api/*` without a `User-Agent` header are rejected by
+  Cloudflare with `403` + error `1010` before they reach the Worker.
+  Callers, including `curl`, `fetch`, and the e2e script, must send a
+  User-Agent (for example `htmlbin-e2e/1`). Local `wrangler dev` doesn't sit
+  behind that ruleset so it only bites against `htmlbin.aesir.works` itself.
+
+## Observability (Sentry)
+
+Both Worker (server) and browser (chrome pages) are wired to Sentry.
+Both no-op when `SENTRY_DSN` is unset, so dev and pre-config preview
+URLs work without any DSN.
+
+- **Server (Worker):** `src/index.ts` wraps the default export with
+  `Sentry.withSentry(...)` from `@sentry/cloudflare`. `tracesSampleRate:
+  0.1` (10% performance traces). `sendDefaultPii: false`. DSN read from
+  `env.SENTRY_DSN` at request time.
+- **Browser:** `/sentry.js` is a Worker-served loader. When DSN is set,
+  it injects Sentry's CDN script (`js.sentry-cdn.com/<publicKey>.min.js`)
+  and runs `Sentry.init`. When unset, returns a no-op comment so the
+  `<script src="/sentry.js" defer>` tags in landing/verify/viewer chrome
+  stay harmless. **We never inject Sentry into user-published drop
+  HTML at `/p/:slug/raw`** — that's the user's content, served in an
+  iframe; we don't touch it.
+- **CSP:** the global middleware in `src/index.ts` conditionally
+  appends `https://js.sentry-cdn.com` *and* `https://browser.sentry-cdn.com`
+  to `script-src`, and `https://*.ingest.sentry.io` (+ `.us.`) to
+  `connect-src` *only when `SENTRY_DSN` is set*. Both origins are
+  required because the Sentry Loader Script (`js.sentry-cdn.com/<key>.min.js`)
+  is a tiny stub that dynamically pulls the full tracing/replay SDK from
+  `browser.sentry-cdn.com`. Whitelisting only `js.` blocks the second hop.
+  Policy stays tight when Sentry is off. The middleware also unconditionally
+  appends `https://static.cloudflareinsights.com` to `script-src` (see
+  next bullet — Cloudflare Web Analytics).
+- **Cloudflare Web Analytics injects a beacon into every `text/html`
+  response at the edge — including user drops at `/p/:slug/raw`.** It's
+  automatic zone-level injection, not something the Worker does, and it's
+  only visible when the request sends `Accept: text/html` (a plain
+  `Accept: */*` fetch returns clean bytes, which is why it's easy to miss).
+  **This is accepted deliberately** — the user was asked and chose to keep
+  it. Don't "fix" it, and don't read the Sentry rule above ("we never
+  inject into user content") as covering it; that rule is about what the
+  Worker adds, not what the edge does.
+  **The one place it had to be stopped is the pattern skeleton.** Served
+  as `text/html`, the beacon lands in the template an agent then fills in
+  and *uploads*, so it becomes stored drop content carrying a pinned SRI
+  hash that breaks when the beacon rotates — and it contradicts the
+  pattern's own zero-`<script>` rule. `getPatternAsset()` therefore serves
+  templates as `text/plain`; non-HTML responses aren't rewritten. Keep it
+  that way. The e2e asserts the served bytes, not just the content type.
+- **Config:** `SENTRY_DSN` is a Worker secret. Because this Worker
+  uses versioned deploys (CI runs `wrangler versions upload` on PRs),
+  use `wrangler versions secret put SENTRY_DSN` — *not* the plain
+  `wrangler secret put`, which errors with "latest version of your
+  Worker isn't currently deployed." Local dev: copy `.dev.vars.example`
+  and uncomment the `SENTRY_DSN` line. The DSN is *public* by Sentry's
+  design — embedding it in client JS is intended.
+- **Source maps:** `sentry-cli` is for source-map upload + release tagging.
+  We don't currently upload source maps (Worker is bundled; cold-path
+  acceptable). Add later via the deploy workflow if stack-trace
+  symbolication becomes painful.
+
+## Files
+
+```
+src/
+  index.ts          ─ Hono routes (/, /verify, /p/:slug, +discoverability)
+  auth.ts           ─ device-code flow + Bearer middleware
+  github-oauth.ts   ─ /auth/github/start + /auth/github/callback
+  drops.ts          ─ /api/drops CRUD with versioning + context
+  mcp.ts            ─ POST /mcp, Streamable HTTP, same hb_ bearer token
+  onboard.ts        ─ /api/onboard JSON descriptor + markdown walkthrough
+  skill.ts          ─ /.well-known/agent-skills/* (Agent Skills RFC v0.2.0)
+  patterns.ts       ─ /.well-known/patterns/* (inline mirror of patterns/*.md)
+  crypto.ts         ─ Web Crypto wrappers
+  slug.ts           ─ 9-char base62 id generator
+  db.ts             ─ D1 helpers + rate limiter
+  discoverability.ts─ robots.txt, llms.txt, sitemap, agent-card, openapi, api-catalog
+  safety-net.ts     ─ mobile safety-net injector applied to /p/:slug/raw
+  styles.ts         ─ THE stylesheet + STYLE_HREF (auto-bumping cache buster)
+  types.ts          ─ shared types
+  views/
+    chrome.ts       ─ shared top-bar, footer, httpMemo() helper
+    favicon.ts      ─ inline SVG favicon (light/dark adaptive)
+    og-image.ts     ─ inline SVG OG card (1200×630) — fallback / per-tab source
+    og-png.ts       ─ satori + resvg-wasm PNG renderer (landing + per-drop)
+    landing.ts      ─ /
+    verify.ts       ─ /verify — single "Sign in with GitHub" button
+    viewer.ts       ─ /p/:slug viewer + passcode gate (soft share gate, not encryption)
+
+skills/
+  htmlbin/SKILL.md  ─ human-browsable mirror of src/skill.ts (must stay in sync)
+
+patterns/           ─ human-browsable canonical pattern markdown — source of truth
+  pr-explainer.md       ─ "explain this PR / summarize this diff"
+  summary-roundup.md    ─ discussion summaries, weekly status, incident timelines
+  plan-spec-explainer.md─ plan.md / spec.md publishing
+  session-explainer.md  ─ agent session writeups — problem, approach, dead ends
+  session-explainer.template.html ─ required skeleton for the above (prescriptive)
+  # Mirrored byte-for-byte into src/patterns.ts (wrangler .md-import gotcha).
+
+.github/workflows/
+  deploy.yml        ─ production deploy on main, versioned preview on PR
+
+schema.sql          ─ D1 schema (idempotent for fresh installs)
+migrations/         ─ ALTER-style migrations against an existing D1
+wrangler.toml       ─ Cloudflare config (Worker name, D1, KV, AI, [[rules]] CompiledWasm)
+scripts/
+  setup.mjs         ─ provisions D1 + KV, applies schema, sets pepper
+  agent-e2e.sh      ─ full functional test
+  stats.mjs         ─ text-based stats snapshot (npm run stats)
+  dashboard/        ─ local-only operator web UI (npm run dashboard)
+    server.mjs        ─ http server + wrangler subprocess proxy
+    index.html / app.js / style.css  ─ vanilla SPA, no build step
+.dev.vars.example   ─ TOKEN_PEPPER + GITHUB_CLIENT_ID/SECRET (dev-mock)
+```
+
+DB table, URL path, and user-facing copy are all aligned: **drops**
+(`drops` table, `/api/drops/...`). The historical "prototypes" naming
+came from an internal Webflow tool and was retired in this codebase.
+
+## Testing
+
+```
+npm run test:e2e
+```
+
+Walks discovery → onboarding → device-code auth → MCP → CRUD →
+versioning → context → passcode lifecycle → ownership → cleanup.
+Same script works
+against deployed `htmlbin.aesir.works` if you change `BASE_URL`.
+
+When you finish meaningful work, re-run that script before claiming the
+system works.
+
+## Limits (all configurable)
+
+- 2 MB / drop (`MAX_HTML_BYTES` in `drops.ts`)
+- 64 KB / context per version
+- 200 versions / drop
+- 60 writes / minute / token
+- 500 writes / day / token
+- 500 drops / account
+- 10-min TTL on verification codes
+
+## Knowledge capture rule
+
+Per the user's global rule, at end of every meaningful session, update:
+- This file (operating manual)
+- DESIGN.md (if anything visual changed)
+- README.md (if API/setup/limits changed)
+
+If you touched code without updating any of the above, ask before closing.

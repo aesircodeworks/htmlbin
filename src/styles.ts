@@ -1,0 +1,1444 @@
+// Single source of truth for visual styles across every public page.
+// Served at /style.css with a long edge cache. Touch this file → every page
+// updates. Page-specific overrides are kept inline in their views, but the
+// design language lives here.
+
+import { FONT_FACE_CSS } from "./fonts";
+
+export const STYLES_CSS = /* css */ `${FONT_FACE_CSS}
+:root {
+  --bg: #FFFFFF;
+  --bg-2: #FAFAFA;
+  --bg-3: #F5F5F5;
+  --ink: #0A0A0A;
+  --ink-2: #171717;
+  --ink-soft: #737373;
+  --ink-softer: #A3A3A3;
+  --rule: #E5E5E5;
+  --rule-soft: #F0F0F0;
+  --red: #D93025;
+  --red-press: #A52714;
+  --red-bg: #FCE8E6;
+  --red-bg-stroke: #F4C7C3;
+  --green-dot: #1F8F4A;
+  --code-bg: #0A0A0A;
+  --code-fg: #FAFAFA;
+  --code-dim: #A3A3A3;
+  --code-em: #FF6470;
+  --sans: "Geist", -apple-system, "Inter", system-ui, sans-serif;
+  --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Radius scale. Three steps only — small (inline/controls), medium
+     (blocks), large (the prompt slab). Before this existed the sheet
+     carried nine ad-hoc radii, which reads as unconsidered. */
+  --r-sm: 4px;
+  --r-md: 8px;
+  --r-lg: 14px;
+
+  /* Terminal-syntax colors. Previously hardcoded at each use site, which
+     let a second accent (two different blues) leak into a palette
+     DESIGN.md describes as "black, white, gray, and one red". */
+  --ok: #1F8A3A;          /* success state on light */
+  --ok-on-dark: #34D058;  /* success state inside code surfaces */
+  --syn-key: #3B6EE8;     /* command keyword — light surfaces */
+  --syn-key-dark: #82B1FF;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+::selection { background: var(--red); color: #fff; }
+a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--rule);
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+a:hover { color: var(--red); text-decoration-color: var(--red); }
+
+/* ---------- top bar (dev-y modeline / breadcrumb) ----------
+   Tells you literally where you are: <htmlbin> / VERB path · status
+   No border, no fill — it floats as a header line of the same document
+   so the whole page reads as one continuous artifact. */
+.page-head {
+  background: transparent;
+}
+.page-head .row {
+  max-width: 720px; margin: 0 auto;
+  padding: 22px 28px 0;
+  display: flex; align-items: center; justify-content: space-between;
+  font-family: var(--mono); font-size: 12px;
+  gap: 16px;
+}
+.crumb {
+  display: inline-flex; align-items: center; gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.crumb .wordmark {
+  font-family: var(--mono); font-weight: 500; font-size: 13px;
+  color: var(--ink); letter-spacing: -0.01em;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 4px;
+  text-decoration-thickness: 1px;
+  cursor: pointer;
+  transition: text-decoration-color 0.12s;
+}
+.crumb .wordmark:hover { text-decoration-color: var(--red); color: var(--ink); }
+.crumb .wordmark::before { content: "<"; color: var(--red); }
+.crumb .wordmark::after  { content: ">"; color: var(--red); }
+.crumb .home-arrow {
+  color: var(--ink-softer);
+  font-family: var(--mono);
+  margin-right: 4px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: color 0.12s;
+}
+.crumb .home-arrow:hover { color: var(--red); }
+.crumb .slash { color: var(--ink-softer); }
+.crumb .verb {
+  color: var(--red); font-weight: 500;
+  letter-spacing: 0.02em;
+}
+.crumb .path {
+  color: var(--ink); font-weight: 400;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 26ch;
+}
+.crumb .ver {
+  color: var(--ink-softer);
+  margin-left: 2px;
+}
+.crumb .ver::before { content: "·"; padding-right: 6px; color: var(--ink-softer); }
+/* head-meta is the status cluster: live pill, separator, /api/onboard. */
+.head-meta {
+  display: inline-flex; align-items: center;
+  gap: 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--rule);
+  padding: 5px 10px;
+  border-radius: var(--r-sm);
+  font-family: var(--mono); font-size: 12px;
+  color: var(--ink-soft);
+  flex-shrink: 0;
+}
+.head-meta a { text-decoration: none; color: var(--ink-soft); font-size: 12px; }
+.head-meta a:hover { color: var(--red); }
+.head-meta a:hover .pkg { color: var(--red); }
+.head-meta .sep { color: var(--ink-softer); }
+
+/* live · v1 status pill — the only continuous motion on the page.
+   Solid green dot sits inside .head-meta as a "service is running"
+   signal; an ::after layer expands and fades to ping. Slow cadence
+   (2.6s) so it reads as a heartbeat, not a strobe. Disabled under
+   prefers-reduced-motion below. */
+.live-pill {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-family: var(--mono); font-size: 12px;
+  color: var(--ink-soft);
+  letter-spacing: 0.01em;
+  user-select: none;
+  flex-shrink: 0;
+}
+.live-dot {
+  position: relative;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--green-dot);
+  display: inline-block;
+  flex: 0 0 auto;
+}
+.live-dot::after {
+  content: ""; position: absolute; inset: 0;
+  border-radius: 50%;
+  background: var(--green-dot);
+  animation: live-pulse 2.6s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+@keyframes live-pulse {
+  0%   { transform: scale(1);   opacity: 0.55; }
+  70%  { transform: scale(2.6); opacity: 0; }
+  100% { transform: scale(2.6); opacity: 0; }
+}
+@media (max-width: 720px) {
+  .page-head .row { padding: 10px 22px; }
+  .crumb .path { max-width: 18ch; }
+}
+
+/* ---------- main column ----------
+   Default 720px is the long-form / essay width — right for /manifesto,
+   /verify, /404, and the viewer-chrome pages. The landing overrides to
+   880px (see body.landing rule below) so the tabbed prompt slab and the
+   2×2 capability grid get real room. */
+main {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 28px 28px 96px;   /* tight gap to the breadcrumb above */
+}
+
+/* Landing-scoped width override. Wider container for the prompt slab,
+   the tool section, and the capability grid; the header expands to
+   match so it doesn't look like the modeline floats off-axis from the
+   content below. Other pages stay at the narrower default. */
+body.landing .page-head .row,
+body.landing main { max-width: 880px; }
+@media (max-width: 720px) {
+  .page-head .row { padding: 18px 22px 0; }
+  main { padding: 22px 22px 80px; }
+  .head-meta { gap: 12px; }
+  html, body { font-size: 16px; }
+}
+
+/* ---------- HTTP-request memo block ----------
+   Rendered as a real <details> disclosure: the request line is the
+   summary (always visible), the headers + status line are collapsible.
+   Default-expanded everywhere. The "▸" rotates 90° when open. */
+details.req {
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.85;
+  margin-bottom: 32px;
+  position: relative;
+}
+details.req summary.reqline {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  color: var(--ink);
+  margin-bottom: 4px;
+  display: inline-block;
+  padding-right: 8px;
+  outline: none;
+  transition: color 0.12s;
+}
+details.req summary.reqline::-webkit-details-marker { display: none; }
+details.req summary.reqline::marker { content: ""; }
+details.req summary.reqline:hover .verb { text-decoration-color: var(--red); }
+details.req summary.reqline:focus-visible {
+  outline: 1px dashed var(--red);
+  outline-offset: 4px;
+}
+details.req summary.reqline .verb {
+  color: var(--red); font-weight: 500;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 4px;
+  transition: text-decoration-color 0.12s;
+}
+details.req summary.reqline .path  { color: var(--ink); }
+details.req summary.reqline .proto { color: var(--ink-softer); }
+
+/* The triangle prefix: lives on the summary so clicking it toggles the
+   disclosure, exactly like clicking the request line itself.
+   Rotates from ▸ (closed) to ▾ (open). */
+details.req summary.reqline { position: relative; }
+details.req summary.reqline::before {
+  content: "▸";
+  position: absolute;
+  left: -22px; top: 0;
+  color: var(--red);
+  font-size: 12px;
+  line-height: 1.85;
+  transition: transform 0.15s ease-out;
+  transform-origin: 30% 55%;
+}
+details.req[open] summary.reqline::before { transform: rotate(90deg); }
+@media (max-width: 760px) { details.req summary.reqline::before { display: none; } }
+
+details.req .rows {
+  margin-top: 0;
+  /* Subtle reveal animation on open. */
+  animation: reqOpen 0.18s ease-out;
+}
+@keyframes reqOpen {
+  from { opacity: 0; transform: translateY(-2px); }
+  to   { opacity: 1; transform: none; }
+}
+details.req .row {
+  display: grid;
+  grid-template-columns: 78px 1fr;
+  gap: 12px;
+  align-items: baseline;
+}
+details.req .k {
+  color: var(--ink-soft);
+  font-size: 12.5px;
+  font-weight: 400;
+}
+details.req .k::after { content: ":"; color: var(--ink-softer); }
+details.req .v { color: var(--ink); font-weight: 500; }
+details.req .v .em  { color: var(--red); }
+details.req .v .dim { color: var(--ink-soft); font-weight: 400; }
+details.req .resline {
+  margin-top: 8px;
+  color: var(--ink-soft);
+}
+details.req .resline .ok  { color: var(--green-dot); }
+details.req .resline .bad { color: var(--red); }
+
+/* hr.rule is intentionally invisible — the page flows by typography +
+   whitespace, not by sectioning lines. We keep the class so existing
+   markup doesn't break, but it adds no visual rule. */
+hr.rule { display: none; }
+
+/* ---------- prose ---------- */
+.body p {
+  margin: 0 0 24px;
+  max-width: 64ch;
+  font-size: 17px;
+  line-height: 1.65;
+  color: var(--ink-2);
+}
+.body p strong { color: var(--ink); font-weight: 600; }
+.body p em { font-style: normal; color: var(--red); font-weight: 500; }
+
+code, .mono {
+  font-family: var(--mono);
+  font-size: 0.86em;
+}
+.body p code, .body li code, p code, li code {
+  background: var(--bg-2);
+  border: 1px solid var(--rule);
+  padding: 1px 6px;
+  border-radius: var(--r-sm);
+  white-space: nowrap;
+  font-weight: 500;
+  color: var(--ink-2);
+}
+
+.lede {
+  font-size: 19px; line-height: 1.5; color: var(--ink);
+  margin-bottom: 24px; max-width: 56ch;
+}
+
+/* Big typographic anchor on the landing — gives the page a single focal
+   moment without adding any new copy (the line is already in the prose
+   below). Tight letter-spacing, near-black, with a muted subhead. */
+.hero {
+  margin: 32px 0 44px;
+}
+.hero h1 {
+  font-size: clamp(38px, 5.6vw, 60px);
+  line-height: 1.02;
+  letter-spacing: -0.032em;
+  font-weight: 700;
+  color: var(--ink);
+  margin: 0 0 14px;
+  max-width: 18ch;
+}
+.hero h1 em {
+  font-style: normal;
+  color: var(--red);
+}
+.hero p {
+  font-size: 20px;
+  line-height: 1.4;
+  color: var(--ink-soft);
+  max-width: 50ch;
+  margin: 0;
+}
+@media (max-width: 720px) {
+  .hero { margin: 24px 0 36px; }
+  .hero h1 { font-size: 36px; }
+  .hero p  { font-size: 18px; }
+}
+
+/* One-shot entrance for the hero — runs once at first paint, then done.
+   Each word is an inline-block span (.wf) staggered via --i. Subhead
+   trails the last word so the section settles together. Blur drops off
+   so the type re-sharpens as it lands. */
+.hero h1 .wf {
+  display: inline-block;
+  opacity: 0;
+  transform: translateY(0.32em);
+  filter: blur(6px);
+  animation: hero-word-in 620ms cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
+  animation-delay: calc(var(--i, 0) * 65ms + 80ms);
+  will-change: opacity, transform, filter;
+}
+.hero .hero-sub {
+  opacity: 0;
+  transform: translateY(4px);
+  animation: hero-word-in 620ms cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
+  /* land just after the last (6th) word — index 5, +80ms base, +620ms run */
+  animation-delay: 560ms;
+}
+@keyframes hero-word-in {
+  to { opacity: 1; transform: none; filter: none; }
+}
+
+/* Honor system motion preference — kill the entrance animation and the
+   ping ring. The dot itself stays green (it's a status indicator, not
+   motion), but it stops pulsing. */
+@media (prefers-reduced-motion: reduce) {
+  .hero h1 .wf,
+  .hero .hero-sub {
+    animation: none;
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+  .live-dot::after { animation: none; display: none; }
+}
+
+/* ---------- prompt block ----------
+   Dark single-pane terminal-shaped card. Title bar has three
+   traffic-light dots on the left and a static "claude" pill on the
+   right (visual context indicator, not interactive). Body holds the
+   single agent prompt. Below the card sits the big red Copy prompt
+   CTA — the most discoverable action on the page. The card has no
+   internal hairline; title bar and body share the same surface so
+   the card reads as one continuous black slab. */
+.prompt-cue {
+  font: 500 12.5px/1.2 var(--mono);
+  color: var(--ink-soft);
+  margin: 28px 0 10px;
+  letter-spacing: 0.01em;
+}
+/* Flat slab. The 28px-blur ambient shadow this used to carry is the
+   generic floating-card look, and DESIGN.md §3 caps shadows at 1px.
+   A near-black surface on white already separates itself. */
+.prompt {
+  position: relative;
+  background: var(--code-bg);
+  border-radius: var(--r-lg);
+  margin: 0 0 18px;
+  overflow: hidden;
+  box-shadow: 0 1px 0 rgba(0,0,0,0.05);
+}
+.prompt-chrome {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 13px 14px 11px;
+}
+.prompt-chrome .dots { display: inline-flex; gap: 6px; }
+.prompt-chrome .dot {
+  width: 11px; height: 11px; border-radius: 50%; display: block;
+}
+.prompt-chrome .dot.r { background: #FF5F57; }
+.prompt-chrome .dot.y { background: #FEBC2E; }
+.prompt-chrome .dot.g { background: #28C840; }
+.prompt-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: 500 12px/1 var(--mono);
+  letter-spacing: 0.02em;
+  padding: 5px 10px 5px 8px;
+  border-radius: var(--r-sm);
+  border: none;
+  background: rgba(255,255,255,0.10);
+  color: var(--code-fg);
+  user-select: none;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+  -webkit-tap-highlight-color: transparent;
+}
+.prompt-mark:hover { background: rgba(255,255,255,0.16); }
+.prompt-mark:active { background: rgba(255,255,255,0.22); }
+.prompt-mark:focus-visible {
+  outline: 1px solid var(--code-em);
+  outline-offset: 2px;
+}
+.prompt-mark .prompt-mark-icon,
+.prompt-mark .prompt-mark-check {
+  width: 11px;
+  height: 11px;
+  flex: 0 0 auto;
+}
+.prompt-mark .prompt-mark-check { display: none; }
+.prompt-mark.ok {
+  background: rgba(40, 200, 64, 0.18);
+  color: var(--ok-on-dark);
+}
+.prompt-mark.ok .prompt-mark-icon { display: none; }
+.prompt-mark.ok .prompt-mark-check { display: inline-block; }
+
+/* Unused tab rules. The landing prompt is one pane. */
+.prompt-chrome-right { display: inline-flex; align-items: center; }
+/* No container fill or radius of its own. This used to be a rounded,
+   filled track holding two rounded, filled tabs, sitting inside the
+   rounded prompt card — three nested rounded surfaces, and a third
+   distinct chip cluster in a chrome bar that already carries the
+   traffic-light dots and the copy pill. The active tab's own fill is
+   enough to show which panel is selected. */
+.tabs {
+  display: inline-flex; align-items: center; gap: 2px;
+  margin-right: 10px;
+}
+.tab {
+  font: 500 11.5px/1 var(--mono);
+  padding: 5px 11px;
+  border-radius: var(--r-sm);
+  color: rgba(250,250,250,0.55);
+  background: transparent; border: none;
+  cursor: pointer;
+  letter-spacing: 0.02em;
+  transition: background 0.12s, color 0.12s;
+}
+.tab:hover { color: rgba(250,250,250,0.85); }
+.tab.active { color: var(--code-fg); background: rgba(255,255,255,0.14); }
+.tab:focus-visible { outline: 1px solid var(--code-em); outline-offset: 2px; }
+
+/* Both tab-panels share the same grid cell so the slab sizes to the
+   TALLER of the two and the container height stays constant across
+   tab switches. Inactive panel is hidden via visibility (still occupies
+   the cell) instead of display:none (would collapse the cell and make
+   the page jump on every toggle). */
+.prompt-body {
+  padding: 18px 22px 22px;
+  display: grid;
+}
+.tab-panel {
+  grid-area: 1 / 1;
+  visibility: hidden;
+  pointer-events: none;
+}
+.tab-panel.active {
+  visibility: visible;
+  pointer-events: auto;
+}
+.prompt-body pre {
+  font-family: var(--mono);
+  font-size: 13.5px;
+  line-height: 1.7;
+  margin: 0;
+  color: var(--code-fg);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.prompt-body pre .em { color: var(--code-em); }
+
+.copy-cta {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--red);
+  color: #fff;
+  border: none;
+  padding: 11px 18px;
+  font: 600 13px/1 var(--mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  margin: 0 0 18px;
+  transition: background 0.12s, transform 0.04s;
+}
+/* No colored drop-shadow. A red glow under a red button is the "glow"
+   tell, and DESIGN.md §3 rules it out explicitly. The solid red fill is
+   already the loudest thing on the page. Hover uses the existing
+   --red-press token instead of a one-off hex. */
+.copy-cta:hover { background: var(--red-press); }
+.copy-cta:active { transform: translateY(1px); }
+.copy-cta.ok { background: var(--ok); }
+.copy-cta svg { width: 13px; height: 13px; }
+
+.prompt-aftermath {
+  color: var(--ink-soft);
+  font-size: 14px;
+  margin: 0 0 18px;
+}
+
+/* ---------- tool / section ----------
+   Unused. The landing does not render this block. Left in place with
+   the other dead landing rules listed in DESIGN.md. */
+.tool { margin-top: 64px; }
+.tool-eyebrow {
+  font-family: var(--mono); font-size: 11px;
+  color: var(--red); letter-spacing: 0.08em;
+  text-transform: uppercase; font-weight: 500;
+  margin: 0 0 14px;
+}
+.term-lede {
+  font-size: 24px; line-height: 1.3; color: var(--ink);
+  max-width: 42ch; margin: 0 0 6px;
+  font-weight: 600; letter-spacing: -0.018em;
+}
+.term-sub {
+  font-size: 15.5px; line-height: 1.55; color: var(--ink-soft);
+  max-width: 54ch; margin: 0 0 24px;
+}
+.term-block {
+  position: relative;
+  background: var(--code-bg); color: var(--code-fg);
+  border-radius: var(--r-md); padding: 20px 22px;
+  font-family: var(--mono); font-size: 13px; line-height: 1.85;
+  margin: 0 0 32px;
+  box-shadow: 0 1px 0 rgba(0,0,0,0.05);
+}
+.term-block .ln { display: block; }
+.term-block .cmt { color: var(--code-dim); }
+.term-block .em  { color: var(--code-em); }
+.term-block .arr { color: var(--ok-on-dark); }
+.term-block .key { color: var(--syn-key-dark); }
+.term-block .pkg { color: var(--code-em); }
+.term-copy {
+  position: absolute; top: 14px; right: 14px;
+  display: inline-flex; align-items: center; gap: 6px;
+  font: 500 11px/1 var(--mono);
+  padding: 5px 10px 5px 8px;
+  border-radius: var(--r-sm); border: none;
+  background: rgba(255,255,255,0.08);
+  color: rgba(250,250,250,0.7);
+  cursor: pointer; letter-spacing: 0.02em;
+  transition: background 0.12s, color 0.12s;
+  -webkit-tap-highlight-color: transparent;
+}
+.term-copy:hover { background: rgba(255,255,255,0.14); color: #fff; }
+.term-copy:focus-visible { outline: 1px solid var(--code-em); outline-offset: 2px; }
+.term-copy svg { width: 10px; height: 10px; }
+.term-copy.ok { background: rgba(40, 200, 64, 0.18); color: var(--ok-on-dark); }
+
+.caps-cue {
+  font: 500 11px/1.2 var(--mono);
+  color: var(--ink-softer);
+  letter-spacing: 0.08em; text-transform: uppercase;
+  margin: 48px 0 14px;
+}
+/* Four capabilities, laid out as a borderless two-column list.
+   Previously this was a 2×2 grid of fully-bordered cells with
+   grid-auto-rows:1fr forcing every tile to identical height, each
+   tile opening with an identical 5px red dot. That combination is three
+   named tells at once — everything-equal, ghost-cards, and (with the
+   bordered .mini inside a bordered cell) cards-in-cards. It also
+   contradicted DESIGN.md §6: "if you're tempted to add a border-bottom
+   to 'section' the document, don't. Use whitespace and type weight."
+   Whitespace does the work now. Rows still align to the tallest item in
+   their own row via the grid's default stretch, so the mini-code blocks
+   share a floor per row without every row being locked to one height. */
+.caps {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 38px 44px;
+  margin: 4px 0 32px;
+}
+.cap {
+  display: flex; flex-direction: column;
+}
+.cap .eb {
+  font-family: var(--mono); font-size: 10.5px;
+  color: var(--ink-soft); letter-spacing: 0.1em;
+  text-transform: uppercase; font-weight: 500;
+  margin: 0 0 10px;
+}
+.cap h3 {
+  font-family: var(--sans); font-size: 17px; font-weight: 600;
+  letter-spacing: -0.012em; line-height: 1.25;
+  color: var(--ink); margin: 0 0 8px;
+}
+.cap p {
+  font-size: 14px; line-height: 1.55; color: var(--ink-soft);
+  margin: 0 0 16px; flex: 1 1 auto;
+}
+.cap p code {
+  background: var(--bg-2);
+  border: 1px solid var(--rule);
+  padding: 1px 5px; border-radius: var(--r-sm);
+  font-size: 12px; color: var(--ink-2);
+  font-family: var(--mono);
+}
+/* Fill, no stroke. A deeper fill reads as a distinct code surface
+   without adding another outlined box to the section. */
+.cap .mini {
+  font-family: var(--mono); font-size: 12px; line-height: 1.7;
+  color: var(--ink-2);
+  background: var(--bg-3);
+  border-radius: var(--r-sm);
+  padding: 10px 12px;
+  margin: auto 0 0;
+  white-space: pre;
+  overflow-x: auto;
+}
+.cap .mini .em  { color: var(--red); }
+.cap .mini .cmt { color: var(--ink-softer); }
+.cap .mini .arr { color: var(--green-dot); }
+.cap .mini .key { color: var(--syn-key); }
+
+.term-foot {
+  display: flex; gap: 18px; padding-top: 12px;
+  font: 500 12.5px/1.4 var(--mono);
+  color: var(--ink-soft); flex-wrap: wrap;
+}
+.term-foot a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 3px; }
+.term-foot a:hover { color: var(--red); text-decoration-color: var(--red); }
+.term-foot .sep { color: var(--ink-softer); }
+
+@media (max-width: 600px) {
+  .caps { grid-template-columns: 1fr; grid-auto-rows: auto; }
+  .cap .mini { white-space: pre-wrap; }
+}
+
+/* ---------- examples index ----------
+   A subtle "what people are building" list below the prompt block.
+   Reads as a directory listing, not a card grid. Two-column row:
+   slug (mono, dim) + caption (mono, ink). Whole row is one <a>; on
+   hover both columns turn red. No box, no border, no icons. */
+.examples {
+  margin: 36px 0 8px;
+}
+.examples .cue {
+  font: 500 12.5px/1.2 var(--mono);
+  color: var(--ink-soft);
+  margin: 0 0 14px;
+  letter-spacing: 0.01em;
+}
+.examples ul {
+  list-style: none;
+  display: grid;
+  gap: 4px;
+  padding: 0;
+  margin: 0;
+}
+.examples a {
+  display: grid;
+  grid-template-columns: 13ch 1fr 14ch;
+  gap: 18px;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--ink);
+  text-decoration: none;
+  padding: 4px 0;
+  align-items: baseline;
+  transition: color 0.12s;
+}
+.examples a .slug { color: var(--ink-soft); }
+.examples a .kind {
+  color: var(--ink-softer); text-align: right;
+  font-size: 10.5px; letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.examples a:hover,
+.examples a:hover .slug,
+.examples a:hover .kind { color: var(--red); }
+@media (max-width: 600px) {
+  .examples a {
+    /* min-content sizes the slug column to the widest slug in the list,
+       so a 9-char id (/p/XXXXXXXXX = 12ch) doesn't push the caption out
+       while shorter 7-char legacy slugs still get tight alignment. */
+    grid-template-columns: min-content 1fr;
+    gap: 12px;
+    font-size: 12.5px;
+  }
+  .examples a .slug { white-space: nowrap; }
+  .examples a .kind { display: none; }
+}
+
+/* ---------- forms ---------- */
+.form { display: flex; flex-direction: column; gap: 20px; max-width: 440px; margin-top: 8px; }
+.field { display: flex; flex-direction: column; gap: 8px; }
+.field .lbl {
+  font-family: var(--mono); font-size: 11px; font-weight: 500;
+  color: var(--ink-soft); letter-spacing: 0.08em; text-transform: uppercase;
+}
+.field input {
+  font-family: var(--mono); font-size: 20px;
+  background: transparent; border: 0;
+  border-bottom: 1.5px solid var(--ink);
+  padding: 10px 4px;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+  outline: none;
+}
+.field input:focus { border-color: var(--red); }
+button.primary {
+  align-self: flex-start;
+  background: var(--ink); color: var(--bg);
+  border: 1px solid var(--ink);
+  font: 500 12px/1 var(--mono);
+  letter-spacing: 0.04em; text-transform: uppercase;
+  padding: 12px 20px; border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+button.primary:hover { background: var(--red); border-color: var(--red); }
+.fineprint {
+  font-family: var(--mono); font-size: 12px;
+  color: var(--ink-soft); line-height: 1.7; margin: 0;
+}
+
+/* Tint + hairline carry the error state. The 3px red left-edge stripe
+   that used to sit on top of both was a third redundant emphasis
+   mechanism — the "side-tab border" tell. */
+.error {
+  background: var(--red-bg);
+  border: 1px solid var(--red-bg-stroke);
+  color: var(--red-press);
+  padding: 11px 14px;
+  font-size: 14px; font-family: var(--mono);
+  margin-bottom: 20px;
+  border-radius: var(--r-sm);
+}
+
+/* ---------- signoff / footer ---------- */
+.signoff {
+  margin-top: 40px;
+  padding-top: 22px;
+  border-top: 1px solid var(--rule);
+  font-family: var(--mono); font-size: 13px; color: var(--ink-soft);
+  display: flex; align-items: baseline; justify-content: space-between;
+  flex-wrap: wrap; gap: 14px;
+}
+.signoff .sig { color: var(--ink); font-weight: 500; }
+.signoff .sig::before { content: "— "; color: var(--red); }
+.signoff a { color: var(--ink-soft); text-decoration: none; }
+.signoff a:hover { color: var(--red); }
+
+/* Merged footer — landing-only.
+   Replaces the stacked .signoff + footer.tail pair (which read as two
+   near-identical mono strips) with one row carrying brand sigil +
+   discovery links + project credit. Other pages still use .signoff +
+   pageFoot() until a later sweep harmonizes them. */
+.footer-merged {
+  margin-top: 64px; padding-top: 22px;
+  border-top: 1px solid var(--rule);
+  font-family: var(--mono); font-size: 13px; color: var(--ink-soft);
+  display: flex; align-items: baseline; justify-content: space-between;
+  flex-wrap: wrap; gap: 14px;
+}
+.footer-merged .sig { color: var(--ink); font-weight: 500; }
+.footer-merged .sig::before { content: "— "; color: var(--red); }
+.footer-merged .links {
+  display: inline-flex; gap: 14px;
+  align-items: baseline; flex-wrap: wrap;
+}
+.footer-merged .links a { color: var(--ink-soft); text-decoration: none; }
+.footer-merged .links a:hover { color: var(--red); }
+.footer-merged .sep { color: var(--ink-softer); }
+
+footer.tail {
+  background: transparent;
+}
+footer.tail .row {
+  max-width: 720px; margin: 0 auto;
+  padding: 8px 28px 32px;
+  font-family: var(--mono); font-size: 11.5px; color: var(--ink-softer);
+  display: flex; gap: 18px; flex-wrap: wrap; justify-content: space-between;
+  letter-spacing: 0.02em;
+}
+footer.tail a { color: var(--ink-soft); text-decoration-color: var(--rule); }
+footer.tail a:hover { color: var(--red); text-decoration-color: var(--red); }
+@media (max-width: 720px) { footer.tail .row { padding: 8px 22px 32px; } }
+
+/* ---------- manifesto-specific ---------- */
+.eyebrow {
+  font-family: var(--mono); font-size: 12px;
+  color: var(--ink-soft); letter-spacing: 0.06em;
+  text-transform: uppercase; margin-bottom: 12px;
+}
+h1.title {
+  font-family: var(--sans);
+  font-size: clamp(36px, 5vw, 52px);
+  line-height: 1.05;
+  letter-spacing: -0.025em;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+h1.title em { font-style: normal; color: var(--red); }
+.subtitle {
+  font-family: var(--mono); font-size: 13px;
+  color: var(--ink-soft); letter-spacing: 0.02em;
+  margin-bottom: 36px;
+}
+h2.section {
+  font-family: var(--mono);
+  font-size: 12px; letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--red);
+  font-weight: 500;
+  margin: 48px 0 12px;
+}
+/* Same treatment as .error — the red left-edge stripe is gone; the
+   tinted surface and hairline are enough. */
+.definition {
+  background: var(--bg-2);
+  border: 1px solid var(--rule);
+  padding: 20px 24px;
+  margin-bottom: 26px;
+  font-size: 16px;
+  border-radius: var(--r-sm);
+}
+.definition p { margin: 0 0 12px; max-width: none; }
+.definition p:last-child { margin: 0; }
+.definition .word { font-weight: 600; color: var(--red); }
+/* Upright, not italic — DESIGN.md §7 forbids italic display type across
+   the product, and this was the sheet's only violation. */
+.definition em { color: var(--ink-soft); font-style: normal; }
+
+ol.principles, ol.principles li { list-style: none; padding: 0; }
+ol.principles { counter-reset: p; }
+ol.principles li {
+  counter-increment: p;
+  padding: 16px 0 16px 60px;
+  border-bottom: 1px solid var(--rule-soft);
+  position: relative;
+}
+ol.principles li:last-child { border-bottom: 0; }
+ol.principles li::before {
+  content: counter(p, decimal-leading-zero);
+  position: absolute; left: 0; top: 18px;
+  font-family: var(--mono); font-size: 13px;
+  color: var(--red); font-weight: 500;
+  letter-spacing: 0.04em;
+}
+ol.principles strong { display: block; margin-bottom: 4px; font-size: 17px; font-weight: 600; color: var(--ink); }
+ol.principles span { color: var(--ink-soft); font-size: 16px; line-height: 1.55; }
+
+table.types {
+  border-collapse: collapse; width: 100%;
+  font-size: 15px; margin-bottom: 22px;
+}
+table.types th, table.types td {
+  text-align: left; padding: 12px 14px;
+  border-bottom: 1px solid var(--rule-soft);
+}
+table.types th {
+  font: 500 11px/1 var(--mono);
+  color: var(--ink-soft); letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+table.types td:first-child {
+  font-family: var(--mono); font-size: 13.5px;
+  color: var(--red); white-space: nowrap; width: 100px;
+}
+table.types td:last-child { color: var(--ink-2); }
+
+pre.lifecycle {
+  font-family: var(--mono); font-size: 12.5px;
+  line-height: 1.8;
+  background: var(--code-bg);
+  color: var(--code-fg);
+  border-radius: var(--r-sm);
+  padding: 22px 24px;
+  overflow-x: auto;
+  margin-bottom: 24px;
+  white-space: pre;
+}
+
+.foot-back {
+  margin-top: 56px; padding-top: 24px;
+  border-top: 1px solid var(--rule);
+  font-family: var(--mono); font-size: 13px;
+}
+.foot-back a { color: var(--ink-soft); text-decoration: none; }
+.foot-back a:hover { color: var(--red); }
+
+/* ---------- 404 ---------- */
+.notfound {
+  display: flex; flex-direction: column; gap: 6px;
+}
+.notfound .stamp {
+  font-family: var(--mono); font-size: 12px;
+  color: var(--red); letter-spacing: 0.16em; text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.notfound h1 {
+  font-size: clamp(48px, 9vw, 80px); line-height: 1.05;
+  letter-spacing: -0.025em; font-weight: 700;
+  margin-bottom: 12px;
+}
+.notfound p {
+  color: var(--ink-soft); font-size: 18px; max-width: 50ch;
+}
+
+/* ---------- viewer bar ---------- */
+.viewer-bar {
+  display: flex; align-items: center; gap: 14px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--bg-2);
+  flex-wrap: wrap;
+  font-size: 13px;
+  font-family: var(--sans);
+}
+.viewer-bar .sep { color: var(--ink-softer); font-family: var(--mono); }
+/* Title and description share the leftover space proportionally instead
+   of each being capped at a fixed slice of the viewport. The old
+   max-width:28vw / 24vw pair truncated a short title on a wide
+   screen while there was room to spare — a clipped label with no reason
+   to be clipped. Both still ellipsize, but only once they actually run
+   out of room, and the title gets twice the share of the description. */
+.viewer-bar .title {
+  font-weight: 600; font-size: 14px; color: var(--ink);
+  flex: 2 1 auto; min-width: 8ch;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.viewer-bar .desc {
+  font-size: 13px; color: var(--ink-soft);
+  flex: 1 1 auto; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.viewer-bar .right {
+  margin-left: auto;
+  flex: 0 0 auto;
+  display: flex; align-items: center; gap: 14px;
+  font-family: var(--mono); font-size: 12px; color: var(--ink-soft);
+}
+.viewer-bar .right a { color: inherit; }
+.viewer-bar .right a:hover { color: var(--red); }
+
+/* Mobile / narrow viewports: drop the description, let the title take
+ * remaining width, and force the action group onto its own row so the
+ * top row stays "wordmark / title". */
+@media (max-width: 720px) {
+  .viewer-bar { gap: 8px 12px; padding: 10px 14px; }
+  .viewer-bar .desc, .viewer-bar .desc-sep { display: none; }
+  .viewer-bar .title {
+    max-width: none; flex: 1 1 0; min-width: 0; font-size: 13.5px;
+  }
+  .viewer-bar .right {
+    width: 100%; margin-left: 0;
+    gap: 12px; font-size: 11.5px;
+    flex-wrap: wrap;
+  }
+}
+.lock-form { display: inline-flex; margin: 0; padding: 0; }
+.lock-pill {
+  background: var(--ink); color: var(--bg);
+  padding: 3px 9px; border-radius: var(--r-sm);
+  font: 500 10.5px/1 var(--mono);
+  letter-spacing: 0.04em; text-transform: uppercase;
+  border: 0;
+  cursor: pointer;
+  display: inline-flex; align-items: center;
+  transition: background 0.12s;
+}
+.lock-pill .lock-action { display: none; }
+.lock-pill:hover,
+.lock-pill:focus-visible { background: var(--red); outline: none; }
+.lock-pill:hover .lock-state,
+.lock-pill:focus-visible .lock-state { display: none; }
+.lock-pill:hover .lock-action,
+.lock-pill:focus-visible .lock-action { display: inline; }
+iframe.canvas { border: 0; width: 100%; background: #fff; flex: 1; }
+
+/* ---------- locked drop gate ---------- */
+/* Centered, minimal, Apple-ish. The HTTP memo above stays as our signature
+   chrome; the gate itself is one column of essentials and nothing more. */
+.gate {
+  display: flex; flex-direction: column; align-items: center;
+  text-align: center;
+  width: 100%; max-width: 360px;
+  margin: 56px auto 0;
+}
+.gate-title {
+  font-size: 22px; font-weight: 500; letter-spacing: -0.3px; line-height: 1.25;
+  color: var(--ink);
+  margin: 0;
+  max-width: 100%;
+  word-break: break-word;
+}
+.gate-sub {
+  font: 500 11px/1 var(--mono);
+  color: var(--ink-soft);
+  letter-spacing: 0.16em; text-transform: uppercase;
+  margin: 10px 0 40px;
+}
+.gate-form { width: 100%; display: flex; flex-direction: column; align-items: center; }
+.gate-row {
+  position: relative;
+  width: 100%;
+  margin-bottom: 28px;
+}
+.gate-input {
+  width: 100%; box-sizing: border-box;
+  font-family: var(--mono); font-size: 20px;
+  background: transparent; border: 0;
+  border-bottom: 1.5px solid var(--ink);
+  /* Symmetric horizontal padding so text-align:center centers within
+     the same content box on both sides. The "show" button is positioned
+     absolutely on top of the right padding — it doesn't affect layout. */
+  padding: 10px 56px;
+  text-align: center;
+  letter-spacing: 0.18em;
+  color: var(--ink);
+  outline: none;
+  -webkit-text-security: disc;
+  text-security: disc;
+  transition: border-color 0.12s;
+}
+/* Don't mask the placeholder text or stretch its tracking. */
+.gate-input::placeholder {
+  -webkit-text-security: none; text-security: none;
+  letter-spacing: 0.04em;
+  color: var(--ink-softer);
+  font-size: 16px;
+}
+.gate-input:focus { border-color: var(--red); }
+.gate-show {
+  position: absolute; right: 0; bottom: 8px;
+  background: transparent; border: 0;
+  font: 500 10.5px/1 var(--mono);
+  color: var(--ink-softer);
+  letter-spacing: 0.12em; text-transform: uppercase;
+  padding: 8px 6px;
+  cursor: pointer;
+  transition: color 0.12s;
+}
+.gate-show:hover { color: var(--ink); }
+.gate-show:focus-visible { outline: 1px dotted var(--ink-soft); outline-offset: 2px; }
+.gate-submit {
+  background: var(--ink); color: var(--bg);
+  border: 1px solid var(--ink);
+  font: 500 12px/1 var(--mono);
+  letter-spacing: 0.06em; text-transform: uppercase;
+  padding: 12px 32px; border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.gate-submit:hover { background: var(--red); border-color: var(--red); }
+.gate-error {
+  font-family: var(--mono); font-size: 12px;
+  color: var(--red);
+  letter-spacing: 0.04em;
+  margin: 18px 0 0;
+}
+.gate-fine {
+  font-family: var(--mono); font-size: 11.5px;
+  color: var(--ink-softer);
+  letter-spacing: 0.04em;
+  margin: 48px 0 0;
+}
+@media (max-width: 480px) {
+  .gate { margin-top: 36px; max-width: 100%; padding: 0 8px; }
+  .gate-input { font-size: 18px; }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   LANDING REDESIGN
+
+   Everything here is scoped to body.landing (or to classes only the
+   landing emits) so /verify and /p/:slug keep the existing chrome
+   untouched. The old .page-head / details.req / .prompt / .hero rules
+   above are still live for those two pages.
+
+   Why this exists: the previous landing was a left-aligned document on
+   pure white with the HTTP memo as its hero. Against the pages that do
+   this well it read as unstyled rather than restrained. The moves that
+   changed that, roughly in order of effect:
+
+     1. A tinted page with a dot texture, so white surfaces have
+        something to sit on.
+     2. Centred composition and a real nav with one solid action.
+     3. Display type carrying the claim, all black - no accent-coloured
+        word, which is the most templated move in this category.
+     4. A short subhead that states the mechanic. Researched lengths:
+        Vercel 5-word headline, Linear 8 + 13, Resend 8 + 12.
+     5. Evidence above the fold - a real drop in an iframe, plus the
+        marks of the agents listed in src/views/logos.ts.
+
+   This bends DESIGN.md §1, §3 (pure white, no gradients), §5.2 (memo
+   as hero), §6 (720px left-aligned single column) and §7 (no marketing
+   prose above the fold). DESIGN.md needs amending if this ships.
+   ══════════════════════════════════════════════════════════════════ */
+
+body.landing {
+  --page: #F4F5F6;
+  --card: #FFFFFF;
+  --lshell: 1080px;
+  background: var(--page);
+  /* Texture, not decoration: it renders as dots, not a colour wash.
+     The one gradient on the page. */
+  background-image: radial-gradient(circle, rgba(10,10,10,.055) 1px, transparent 1.1px);
+  background-size: 24px 24px;
+}
+/* the shared 880px <main> does not apply to this layout */
+body.landing main { max-width: none; margin: 0; padding: 0; }
+
+/* ---------- nav ---------- */
+.lnav {
+  position: sticky; top: 0; z-index: 20;
+  background: rgba(244,245,246,.92);
+  border-bottom: 1px solid var(--rule);
+}
+.lnav .in {
+  max-width: var(--lshell); margin: 0 auto;
+  padding: 14px 28px;
+  display: flex; align-items: center; gap: 22px;
+}
+.lnav .wm {
+  font-family: var(--mono); font-weight: 500; font-size: 14.5px;
+  letter-spacing: -0.01em; color: var(--ink); text-decoration: none;
+}
+.lnav .wm::before { content: "<"; color: var(--red); }
+.lnav .wm::after  { content: ">"; color: var(--red); }
+.lnav .links { display: flex; gap: 20px; margin-left: 14px; }
+.lnav .links a {
+  font-size: 14px; color: var(--ink-soft);
+  text-decoration: none; transition: color 0.12s;
+}
+.lnav .links a:hover { color: var(--ink); }
+.lnav .right { margin-left: auto; display: flex; align-items: center; gap: 16px; }
+.lnav .gh {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-family: var(--mono); font-size: 12.5px;
+  color: var(--ink-soft); text-decoration: none;
+}
+.lnav .gh:hover { color: var(--ink); }
+.lnav .gh svg { width: 15px; height: 15px; flex: 0 0 auto; }
+.lnav .btn {
+  background: var(--ink); color: #fff;
+  font-size: 13.5px; font-weight: 500;
+  padding: 9px 16px; border-radius: var(--r-md);
+  border: 1px solid var(--ink);
+  text-decoration: none; white-space: nowrap;
+  transition: background 0.12s;
+}
+.lnav .btn:hover { background: #262626; }
+
+/* ---------- hero ---------- */
+.lhero {
+  max-width: var(--lshell); margin: 0 auto;
+  padding: 96px 28px 0; text-align: center;
+}
+.lhero h1 {
+  font-size: clamp(38px, 5.6vw, 66px);
+  line-height: 1.03; letter-spacing: -0.035em;
+  font-weight: 700; max-width: 17ch;
+  margin: 0 auto 22px;
+}
+.lhero .lede {
+  font-size: 19.5px; line-height: 1.52;
+  color: var(--ink-soft);
+  max-width: 60ch; margin: 0 auto 34px;
+}
+
+/* ---------- the one action ---------- */
+/* No traffic lights. The reference set does not use fake window chrome
+   and it was the most toy-like thing on the old fold. */
+.lbox {
+  max-width: 720px; margin: 0 auto;
+  background: var(--code-bg);
+  border-radius: var(--r-lg);
+  overflow: hidden; text-align: left;
+  box-shadow: 0 1px 2px rgba(10,10,10,.06), 0 8px 24px -18px rgba(10,10,10,.28);
+}
+.lbox .strip {
+  display: flex; align-items: center;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+  padding: 0 6px 0 4px;
+}
+.lbox .strip .t {
+  background: none; border: 0; cursor: pointer;
+  font-family: var(--mono); font-size: 12.5px;
+  color: rgba(239,239,239,.5);
+  padding: 13px 14px;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+  transition: color 0.12s;
+}
+.lbox .strip .t:hover { color: rgba(239,239,239,.85); }
+.lbox .strip .t.on { color: #fff; border-bottom-color: var(--red); }
+.lbox .cp {
+  margin-left: auto;
+  background: rgba(255,255,255,.07); border: 0; cursor: pointer;
+  color: rgba(239,239,239,.72);
+  font-family: var(--mono); font-size: 11.5px;
+  padding: 6px 11px; border-radius: var(--r-sm);
+  transition: background 0.12s, color 0.12s;
+}
+.lbox .cp:hover { background: rgba(255,255,255,.13); color: #fff; }
+.lbox .cp.ok { background: rgba(40,190,70,.18); color: var(--ok-on-dark); }
+/* One prompt pane. The grid cell keeps the pre in flow if a second
+   pane is added later. */
+.lbox .body { padding: 20px 22px 22px; display: grid; }
+.lbox pre {
+  grid-area: 1 / 1;
+  font-family: var(--mono); font-size: 13.5px; line-height: 1.75;
+  color: var(--code-fg);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  visibility: hidden; pointer-events: none;
+}
+.lbox pre.on { visibility: visible; pointer-events: auto; }
+.lbox pre .em { color: var(--code-em); }
+.lbox pre .c, .lbox pre .d { color: var(--code-dim); }
+.lbox pre .a { color: var(--ok-on-dark); }
+
+/* ---------- the primary action ---------- */
+/* The page previously had no CTA verb at all: the only action was a
+   small copy pill inside the code box chrome. For a page whose whole
+   job is starting the device-code flow — and which sits at the top of a
+   funnel that loses ~41% at /verify — that was the weakest element on
+   it. Copying the prompt IS the conversion event, so it gets a real
+   button with a real verb, and the in-chrome pill is gone so there is
+   still only one copy affordance. */
+.lcta {
+  display: inline-flex; align-items: center; gap: 9px;
+  margin: 22px auto 0;
+  background: var(--red); color: #fff;
+  border: 1px solid var(--red);
+  font-size: 14.5px; font-weight: 500;
+  padding: 12px 22px; border-radius: var(--r-md);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, transform 0.04s;
+}
+.lcta:hover { background: var(--red-press); border-color: var(--red-press); }
+.lcta:active { transform: translateY(1px); }
+.lcta.ok { background: var(--ok); border-color: var(--ok); }
+.lcta svg { width: 15px; height: 15px; flex: 0 0 auto; }
+.lcta-fine {
+  font-family: var(--mono); font-size: 11.5px;
+  color: var(--ink-softer); margin: 12px 0 0;
+}
+
+/* ---------- works-with ---------- */
+/* No box per item. Seven outlined pills read as a tag list, and an
+   empty mark slot inside each one read as an unchecked checkbox. */
+.works { max-width: 860px; margin: 38px auto 0; text-align: center; }
+.works-lab { font-size: 13.5px; color: var(--ink-softer); margin-bottom: 20px; }
+.works-row {
+  display: flex; flex-wrap: wrap; justify-content: center;
+  align-items: center; gap: 14px 30px;
+}
+.works-row .lg {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 14.5px; font-weight: 500;
+  color: var(--ink-soft); white-space: nowrap;
+  transition: color 0.14s;
+}
+.works-row .lg:hover { color: var(--ink); }
+.works-row .lg svg {
+  width: 17px; height: 17px; flex: 0 0 auto;
+  opacity: .62; transition: opacity 0.14s;
+}
+.works-row .lg:hover svg { opacity: 1; }
+.works-fine {
+  font-family: var(--mono); font-size: 11.5px; line-height: 1.9;
+  color: var(--ink-softer); margin-top: 18px;
+}
+
+/* ---------- evidence ---------- */
+.lsec { max-width: var(--lshell); margin: 0 auto; padding: 92px 28px 0; }
+/* The evidence block reads as part of the fold rather than a new
+   section, and starting it higher shows more of the embedded page. */
+.lsec.lsec-tight { padding-top: 48px; }
+.lsec .eyebrow {
+  font-family: var(--mono); font-size: 11px;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--ink-softer); text-align: center; margin-bottom: 16px;
+}
+.frame {
+  background: var(--card); border: 1px solid var(--rule);
+  border-radius: var(--r-lg); overflow: hidden;
+  box-shadow: 0 1px 2px rgba(10,10,10,.05), 0 20px 44px -32px rgba(10,10,10,.3);
+}
+.frame .bar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 11px 16px; border-bottom: 1px solid var(--rule-soft);
+  font-family: var(--mono); font-size: 12.5px; color: var(--ink-soft);
+}
+.frame .bar .u { color: var(--ink); font-weight: 500; }
+.frame .bar .ver { color: var(--ink-softer); }
+/* Was 11.5px in the faintest ink on the page, floated hard right by
+   margin-left:auto — so it sat far from the version it acts on and read
+   as decoration rather than a control. Now it follows the version, wears
+   the accent, and carries an underline so it is legible as a link. */
+.frame .bar .go {
+  margin-left: 6px;
+  color: var(--red); text-decoration: none;
+  border-bottom: 1px solid var(--red-bg-stroke);
+  transition: border-color 0.12s;
+}
+.frame .bar .go:hover { border-bottom-color: var(--red); }
+.shot { position: relative; }
+/* The frame crops mid-sentence, which reads as broken rather than
+   truncated. The fade makes the cut deliberate. Functional, not
+   decorative — but it is a gradient, so DESIGN.md §3 needs the
+   carve-out if this ships. */
+.shot::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0;
+  height: 72px; pointer-events: none;
+  background: linear-gradient(to bottom, rgba(255,255,255,0), #fff 75%);
+}
+.frame iframe { display: block; width: 100%; height: 560px; border: 0; background: #fff; }
+.lnote { text-align: center; font-size: 14px; color: var(--ink-soft); margin: 16px auto 0; max-width: 58ch; }
+.lnote .inl { color: var(--red); text-decoration: none; border-bottom: 1px solid rgba(217,48,37,.3); }
+.lnote .inl:hover { border-bottom-color: var(--red); }
+
+/* ---------- the onboard response, shown not illustrated ---------- */
+.onb {
+  max-width: 760px; margin: 0 auto;
+  background: var(--code-bg);
+  border-radius: var(--r-lg); overflow: hidden;
+  box-shadow: 0 1px 2px rgba(10,10,10,.06), 0 8px 24px -18px rgba(10,10,10,.28);
+}
+.onb .strip {
+  display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  padding: 12px 18px; border-bottom: 1px solid rgba(255,255,255,.08);
+  font-family: var(--mono); font-size: 12.5px;
+  color: rgba(239,239,239,.9);
+}
+.onb .strip .m { color: var(--code-em); font-weight: 500; }
+.onb .strip .meta { margin-left: auto; color: rgba(239,239,239,.42); font-size: 11.5px; }
+.onb .body { padding: 16px 18px 20px; overflow-x: auto; }
+.onb pre {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.75;
+  color: var(--code-fg); white-space: pre;
+}
+.onb .k { color: #9CDCFE; }
+.onb .s { color: #CE9178; }
+.onb .n { color: #B5CEA8; }
+.onb .p { color: rgba(239,239,239,.45); }
+.onb .c { color: var(--code-dim); font-style: normal; }
+
+/* ---------- capability list + examples, centred for this layout ---------- */
+body.landing .caps { max-width: 900px; margin: 0 auto; gap: 36px 52px; }
+body.landing .examples { max-width: 760px; margin: 0 auto; }
+body.landing .examples .cue { display: none; }
+/* Bottom spacing is padding, not margin, on purpose. As a margin it
+   collapsed through main (padding:0) and out of body, so it landed
+   outside the tinted background box and html's white showed through as
+   a strip under the footer. Padding cannot collapse. */
+body.landing .footer-merged {
+  max-width: 900px;
+  margin: 70px auto 0;
+  padding-bottom: 56px;
+}
+/* Belt and braces: if any future last-child margin escapes again, the
+   canvas is still the landing surface rather than white. */
+body.landing { min-height: 100vh; }
+
+@media (max-width: 820px) {
+  .lnav .links { display: none; }
+  .lhero { padding-top: 56px; }
+  body.landing .caps { grid-template-columns: 1fr; gap: 30px; }
+}
+@media (max-width: 600px) {
+  .lnav .in, .lhero, .lsec { padding-left: 20px; padding-right: 20px; }
+  .lhero h1 { font-size: 34px; max-width: none; }
+  .lhero .lede { font-size: 17px; }
+  .lbox pre { font-size: 12px; }
+  .frame iframe { height: 300px; }
+  .shot::after { height: 56px; }
+}
+`;
+
+// Cache-bust the stylesheet automatically on every CSS change. The version
+// is a short hash of STYLES_CSS computed once at module load. When the CSS
+// content changes the URL changes, so browsers and Cloudflare's edge can
+// keep their long caches without ever serving a stale stylesheet after a
+// deploy. No manual bumping required.
+function styleHash(s: string): string {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
+  return h.toString(36);
+}
+export const STYLE_VER = styleHash(STYLES_CSS);
+export const STYLE_HREF = `/style.css?v=${STYLE_VER}`;
+
+// Inline <style> tag, embedded into every page <head> instead of a
+// render-blocking <link rel="stylesheet">. Eliminates the extra
+// round-trip Lighthouse flagged (~540ms LCP win on Slow 4G). The
+// stylesheet still ships brotli-compressed inside the HTML response,
+// and brotli efficiently deduplicates the CSS bytes across the body.
+//
+// The /style.css route stays mounted as a side door for external
+// consumers (and so the URL keeps resolving) — see src/index.ts.
+export const STYLE_INLINE = `<style>${STYLES_CSS}</style>`;

@@ -1,0 +1,1175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>htmlbin technical manual</title>
+<style>
+  :root {
+    --bg: #f4f1ea;
+    --ink: #1c1917;
+    --muted: #5c564e;
+    --faint: #6f685f;
+    --line: #d9d2c6;
+    --card: #fffcf8;
+    --wash: #f8ebe8;
+    --store: #ece7dc;
+    --red: #9f1d14;
+    --red-mark: #d93025;
+    --focus: #9f1d14;
+    --code-bg: #1c1917;
+    --code-fg: #f4f0e8;
+    --ok: #1f6b3a;
+    --shadow: 0 1px 0 rgb(28 25 23 / 0.04);
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Consolas, monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141311;
+      --ink: #f4f0e8;
+      --muted: #c8c0b4;
+      --faint: #b3aa9e;
+      --line: #3d3832;
+      --card: #1e1c19;
+      --wash: #3a2422;
+      --store: #2a2723;
+      --red: #ff8f86;
+      --red-mark: #ff6b61;
+      --focus: #ff8f86;
+      --code-bg: #0e0d0c;
+      --code-fg: #f4f0e8;
+      --ok: #8fd4a4;
+      --shadow: none;
+      color-scheme: dark;
+    }
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  html { background: var(--bg); }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 1.0625rem;
+    line-height: 1.55;
+    text-align: start;
+  }
+  .skip-link {
+    position: absolute;
+    left: 0.75rem;
+    top: 0.75rem;
+    z-index: 10;
+    padding: 0.5rem 0.75rem;
+    background: var(--card);
+    color: var(--ink);
+    border: 2px solid var(--ink);
+  }
+  .skip-link:where(:not(:focus)) {
+    position: absolute;
+    clip-path: inset(50%);
+    overflow: hidden;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    border: 0;
+    white-space: nowrap;
+  }
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 3px;
+  }
+  a { color: var(--red); text-underline-offset: 0.15em; }
+  a:hover { text-decoration-thickness: 2px; }
+  .mast {
+    border-bottom: 1px solid var(--line);
+    background: var(--card);
+  }
+  .mast-inner {
+    max-width: 76rem;
+    margin: 0 auto;
+    padding: 1.25rem 1.5rem 1rem;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 0.75rem 1.5rem;
+    align-items: end;
+  }
+  .brand {
+    margin: 0;
+    font-family: var(--mono);
+    font-size: 0.82rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .brand strong {
+    color: var(--ink);
+    font-weight: 650;
+    letter-spacing: 0;
+    text-transform: none;
+    font-size: 1.35rem;
+    font-family: var(--sans);
+  }
+  .brand strong span { color: var(--red); }
+  .mast p { margin: 0.2rem 0 0; color: var(--muted); font-family: var(--mono); font-size: 0.78rem; max-width: 100%; }
+  .mast-meta { margin: 0; text-align: end; }
+  .rule {
+    height: 4px;
+    background: var(--red-mark);
+    border: 0;
+    margin: 0;
+  }
+  .layout {
+    max-width: 76rem;
+    margin: 0 auto;
+    padding: 0 1.5rem 4rem;
+    display: grid;
+    grid-template-columns: 15.5rem minmax(0, 1fr);
+    gap: 2.5rem;
+    align-items: start;
+  }
+  nav[aria-label="Contents"] {
+    position: sticky;
+    top: 0;
+    max-height: 100vh;
+    overflow: auto;
+    padding: 1.25rem 0 2rem;
+  }
+  .nav-kicker {
+    margin: 0 0 0.6rem;
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--faint);
+  }
+  nav ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  nav li { margin: 0; }
+  nav a {
+    display: block;
+    padding: 0.28rem 0.55rem;
+    border-left: 2px solid transparent;
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 0.86rem;
+    line-height: 1.35;
+  }
+  nav a:hover { color: var(--ink); }
+  nav a[aria-current="true"] {
+    color: var(--ink);
+    border-left-color: var(--red-mark);
+    font-weight: 650;
+    background: color-mix(in srgb, var(--red-mark) 8%, transparent);
+  }
+  main { padding-top: 1.5rem; min-width: 0; }
+  main:focus { outline: none; }
+  h1 {
+    font-size: clamp(2rem, 4vw, 2.75rem);
+    line-height: 1.12;
+    letter-spacing: -0.03em;
+    margin: 0 0 0.75rem;
+    max-width: 18ch;
+  }
+  .lede {
+    max-width: 68ch;
+    font-size: 1.12rem;
+    margin: 0 0 1rem;
+  }
+  main > section {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 32rem;
+    margin-top: 3rem;
+    padding-top: 0.25rem;
+  }
+  main > section:first-of-type { content-visibility: visible; }
+  h2 {
+    font-size: 1.45rem;
+    line-height: 1.25;
+    letter-spacing: -0.02em;
+    margin: 0 0 0.85rem;
+    padding-top: 0.4rem;
+  }
+  h2 .num {
+    font-family: var(--mono);
+    font-size: 0.78em;
+    color: var(--red);
+    font-weight: 550;
+    margin-right: 0.45rem;
+  }
+  h3 {
+    font-size: 1.05rem;
+    margin: 1.6rem 0 0.45rem;
+    letter-spacing: -0.01em;
+  }
+  .prose { max-width: 72ch; }
+  p { margin: 0.7rem 0; }
+  ul, ol { margin: 0.6rem 0; padding-left: 1.25rem; max-width: 72ch; }
+  li { margin: 0.28rem 0; }
+  code, .mono { font-family: var(--mono); font-size: 0.88em; }
+  p code, li code, td code, figcaption code {
+    background: color-mix(in srgb, var(--ink) 6%, var(--card));
+    padding: 0.05em 0.3em;
+    border-radius: 0.2em;
+  }
+  pre {
+    max-width: 100%;
+    overflow-x: auto;
+    background: var(--code-bg);
+    color: var(--code-fg);
+    padding: 0.9rem 1rem;
+    border-radius: 0.35rem;
+    border: 1px solid var(--line);
+    line-height: 1.45;
+    font-size: 0.84rem;
+  }
+  pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
+  .src {
+    margin: 1rem 0 0;
+    color: var(--faint);
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    max-width: none;
+  }
+  figure {
+    margin: 1.25rem 0 0.4rem;
+    background: var(--card);
+    border: 1px solid var(--line);
+    box-shadow: var(--shadow);
+    padding: 0.75rem 0.75rem 0.4rem;
+  }
+  figure { overflow-x: auto; }
+  figure svg { display: block; width: 100%; height: auto; }
+  .svg-num { font-family: var(--mono); fill: var(--red); }
+  figcaption {
+    padding: 0.55rem 0.35rem 0.35rem;
+    color: var(--muted);
+    font-size: 0.88rem;
+    max-width: 75ch;
+  }
+  .svg-text { font-family: var(--mono); fill: var(--ink); }
+  .svg-muted { font-family: var(--mono); fill: var(--muted); }
+  .box { fill: var(--card); stroke: var(--ink); stroke-width: 1.25; }
+  .box-red { fill: var(--wash); stroke: var(--red-mark); stroke-width: 1.5; }
+  .box-store { fill: var(--store); stroke: var(--ink); stroke-width: 1.25; }
+  .life { stroke: var(--line); stroke-width: 1.25; }
+  .arrow { stroke: var(--ink); stroke-width: 1.35; fill: none; }
+  .note-box {
+    max-width: 72ch;
+    border-left: 3px solid var(--red-mark);
+    background: var(--wash);
+    padding: 0.75rem 0.9rem;
+    margin: 1rem 0;
+  }
+  .note-box p { margin: 0.35rem 0; }
+  .table-scroll { max-width: 100%; overflow-x: auto; margin: 1rem 0; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.9rem;
+    background: var(--card);
+  }
+  caption {
+    text-align: start;
+    font-weight: 650;
+    margin: 0 0 0.4rem;
+    color: var(--ink);
+  }
+  th, td {
+    border: 1px solid var(--line);
+    padding: 0.4rem 0.55rem;
+    vertical-align: top;
+    text-align: start;
+  }
+  th { background: color-mix(in srgb, var(--store) 70%, var(--card)); font-weight: 650; }
+  .footer {
+    border-top: 1px solid var(--line);
+    padding: 1.25rem 1.5rem 2rem;
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+  .footer-inner { max-width: 76rem; margin: 0 auto; }
+  @media (max-width: 60rem) {
+    .layout { grid-template-columns: 1fr; gap: 0; padding: 0 1rem 3rem; }
+    .mast-inner { flex-direction: column; align-items: flex-start; }
+    .mast-meta { text-align: start; }
+    figure svg { min-width: 40rem; }
+    nav[aria-label="Contents"] {
+      position: static;
+      max-height: none;
+      border-bottom: 1px solid var(--line);
+      margin: 0 -1rem;
+      padding: 1rem;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { scroll-behavior: auto !important; }
+  }
+  @media print {
+    nav[aria-label="Contents"] { display: none; }
+    .layout { display: block; max-width: none; }
+    main > section { content-visibility: visible; break-inside: avoid; }
+    pre, figure { break-inside: avoid; }
+    a { color: var(--ink); }
+  }
+</style>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+<header class="mast">
+  <div class="mast-inner">
+    <p class="brand"><strong><span>&lt;</span>htmlbin<span>&gt;</span></strong><br>technical manual</p>
+    <p class="mast-meta">commit ac00be7 · 23 Aug 2026<br>read against the tree on 5 Oct 2026</p>
+  </div>
+</header>
+<hr class="rule">
+<div class="layout">
+<nav aria-label="Contents">
+  <p class="nav-kicker">Contents</p>
+  <ol role="list">
+    <li><a href="#scope">01 Scope</a></li>
+    <li><a href="#system">02 What it is</a></li>
+    <li><a href="#topology">03 Runtime</a></li>
+    <li><a href="#pipeline">04 Request pipeline</a></li>
+    <li><a href="#identifiers">05 Identifiers and crypto</a></li>
+    <li><a href="#data">06 Data model</a></li>
+    <li><a href="#auth">07 Authentication</a></li>
+    <li><a href="#drops">08 Drop API</a></li>
+    <li><a href="#rendering">09 Public rendering</a></li>
+    <li><a href="#passcode">10 Passcode gate</a></li>
+    <li><a href="#metadata">11 Metadata</a></li>
+    <li><a href="#limits">12 Limits</a></li>
+    <li><a href="#errors">13 Errors</a></li>
+    <li><a href="#discover">14 Discoverability</a></li>
+    <li><a href="#patterns">15 Patterns and skills</a></li>
+    <li><a href="#media">16 Fonts and OG images</a></li>
+    <li><a href="#security">17 Security headers</a></li>
+    <li><a href="#ops">18 Operations</a></li>
+    <li><a href="#map">19 Source map</a></li>
+    <li><a href="#drift">20 Where documents disagree</a></li>
+  </ol>
+</nav>
+<main id="content" tabindex="-1">
+  <h1>How htmlbin actually runs</h1>
+  <p class="lede">One Cloudflare Worker, one D1 database, one KV namespace. An agent publishes a self-contained HTML document and receives a stable public URL. A human signs in with GitHub once, during device-code verification. After that the agent calls the API with a bearer token.</p>
+  <p class="prose">This manual is grounded in the Worker source at commit <code>ac00be7</code>. The protocol descriptor in <code>src/onboard.ts</code> is the contract agents are told to trust. Where another surface (<code>llms.txt</code>, the OpenAPI document, the operating manuals) says something the handlers do not do, the handler wins, and <a href="#drift">section 20</a> lists the difference. This file is an engineering document in the repo. The Worker does not serve it.</p>
+
+  <section id="scope">
+    <h2><span class="num">01</span>Scope</h2>
+    <div class="prose">
+      <p>In scope: the Worker in this repository, its D1 schema, its KV layout, the HTTP contract, and the way HTML is stored and served.</p>
+      <p>In scope with the HTTP API: <code>POST /mcp</code>, a stateless Streamable HTTP door. It checks the same <code>Authorization: Bearer hb_…</code> token and calls the existing drop routes. It does not open a browser login and it does not publish OAuth metadata.</p>
+      <p>Product constraints that the code is built around, from the operating manuals: no signup, login, email, dashboard, or account page on the public site; GitHub OAuth exists only inside device-code verification; HTML is stored as posted; the deploy path is a pull request, a preview URL, approval, then merge to <code>main</code>.</p>
+    </div>
+    <p class="src">Sources: AGENTS.md, CLAUDE.md, src/onboard.ts, src/errors.ts</p>
+  </section>
+
+  <section id="system">
+    <h2><span class="num">02</span>What it is</h2>
+    <div class="prose">
+      <p>A drop is one HTML artifact. The public URL is <code>https://htmlbin.aesir.works/p/&lt;slug&gt;</code>. The slug does not change when the HTML changes. Each upload of new HTML is a version. Metadata (title, description, a string-to-string tag map, an optional passcode) hangs off the drop. An optional <code>context</code> string hangs off a single version.</p>
+      <p>The body lives in KV. Everything you can list, authorize, or count lives in D1. The viewer page is chrome around an iframe. The iframe loads <code>/p/&lt;slug&gt;/raw</code>, which is the stored HTML plus a small mobile safety style.</p>
+    </div>
+    <figure tabindex="0">
+      <svg viewBox="0 0 880 220" role="img" aria-labelledby="fig-split-title">
+        <title id="fig-split-title">D1 holds records. KV holds HTML bytes and caches.</title>
+        <rect class="box" x="16" y="16" width="400" height="188" rx="2"></rect>
+        <rect class="box-store" x="464" y="16" width="400" height="188" rx="2"></rect>
+        <text class="svg-text" x="32" y="44" font-size="15">D1 · htmlbin-db</text>
+        <text class="svg-muted" x="32" y="72" font-size="13">users, tokens, drops, versions</text>
+        <text class="svg-muted" x="32" y="94" font-size="13">verifications, rate_limits</text>
+        <text class="svg-muted" x="32" y="128" font-size="13">drop row: title, tags, passcode hash</text>
+        <text class="svg-muted" x="32" y="150" font-size="13">version row: size, context, time</text>
+        <text class="svg-muted" x="32" y="182" font-size="13">no HTML column</text>
+        <text class="svg-text" x="480" y="44" font-size="15">KV · DROPS_KV</text>
+        <text class="svg-muted" x="480" y="72" font-size="13">html:&lt;slug&gt;:v&lt;n&gt;  → body</text>
+        <text class="svg-muted" x="480" y="104" font-size="13">md:landing</text>
+        <text class="svg-muted" x="480" y="126" font-size="13">og-png:landing:v3</text>
+        <text class="svg-muted" x="480" y="148" font-size="13">og-png:&lt;slug&gt;:v&lt;n&gt;:r3</text>
+        <text class="svg-muted" x="480" y="170" font-size="13">og-fonts:v1</text>
+      </svg>
+      <figcaption>Storage split. The version row points at a KV key by convention (<code>html:&lt;slug&gt;:v&lt;n&gt;</code>). There is no foreign key into KV.</figcaption>
+    </figure>
+    <p class="src">Sources: schema.sql, src/types.ts, src/drops.ts, src/index.ts</p>
+  </section>
+
+  <section id="topology">
+    <h2><span class="num">03</span>Runtime</h2>
+    <div class="prose">
+      <p>The program is a Hono app in <code>src/index.ts</code>. Wrangler name <code>htmlbin</code>, <code>compatibility_date</code> <code>2025-04-01</code>, <code>compatibility_flags = ["nodejs_compat"]</code>. Application code hashes and signs with Web Crypto, not Node <code>crypto</code>. The Worker is bound to the custom domain <code>htmlbin.aesir.works</code>. Generated links use <code>PUBLIC_URL</code>, which is <code>https://htmlbin.aesir.works</code>.</p>
+    </div>
+    <figure tabindex="0">
+      <svg viewBox="0 0 880 460" role="img" aria-labelledby="fig-topo-title">
+        <title id="fig-topo-title">Agents, browsers, and crawlers talk only to the Worker. The Worker talks to D1, KV, GitHub, Workers AI, and optionally Sentry.</title>
+        <rect class="box" x="36" y="24" width="180" height="64" rx="2"></rect>
+        <text class="svg-text" x="126" y="52" text-anchor="middle" font-size="14">Agent</text>
+        <text class="svg-muted" x="126" y="72" text-anchor="middle" font-size="12">Bearer hb_…</text>
+        <rect class="box" x="280" y="24" width="200" height="64" rx="2"></rect>
+        <text class="svg-text" x="380" y="52" text-anchor="middle" font-size="14">Human browser</text>
+        <text class="svg-muted" x="380" y="72" text-anchor="middle" font-size="12">/verify, /p/&lt;slug&gt;</text>
+        <rect class="box" x="544" y="24" width="200" height="64" rx="2"></rect>
+        <text class="svg-text" x="644" y="52" text-anchor="middle" font-size="14">Crawlers</text>
+        <text class="svg-muted" x="644" y="72" text-anchor="middle" font-size="12">robots, llms, OpenAPI</text>
+        <rect class="box-red" x="250" y="160" width="380" height="96" rx="2"></rect>
+        <text class="svg-text" x="440" y="196" text-anchor="middle" font-size="16">Worker · src/index.ts</text>
+        <text class="svg-muted" x="440" y="220" text-anchor="middle" font-size="13">Hono routes, auth, viewer, OG</text>
+        <line class="arrow" x1="126" y1="88" x2="360" y2="160" marker-end="url(#ah)"></line>
+        <line class="arrow" x1="380" y1="88" x2="420" y2="160" marker-end="url(#ah)"></line>
+        <line class="arrow" x1="644" y1="88" x2="520" y2="160" marker-end="url(#ah)"></line>
+        <rect class="box-store" x="24" y="330" width="150" height="72" rx="2"></rect>
+        <text class="svg-text" x="99" y="362" text-anchor="middle" font-size="14">D1</text>
+        <text class="svg-muted" x="99" y="382" text-anchor="middle" font-size="12">binding DB</text>
+        <rect class="box-store" x="194" y="330" width="150" height="72" rx="2"></rect>
+        <text class="svg-text" x="269" y="362" text-anchor="middle" font-size="14">KV</text>
+        <text class="svg-muted" x="269" y="382" text-anchor="middle" font-size="12">binding DROPS_KV</text>
+        <rect class="box-store" x="364" y="330" width="170" height="72" rx="2"></rect>
+        <text class="svg-text" x="449" y="362" text-anchor="middle" font-size="14">GitHub OAuth</text>
+        <text class="svg-muted" x="449" y="382" text-anchor="middle" font-size="12">read:user</text>
+        <rect class="box-store" x="554" y="330" width="150" height="72" rx="2"></rect>
+        <text class="svg-text" x="629" y="362" text-anchor="middle" font-size="14">Workers AI</text>
+        <text class="svg-muted" x="629" y="382" text-anchor="middle" font-size="12">landing → markdown</text>
+        <rect class="box-store" x="724" y="330" width="132" height="72" rx="2"></rect>
+        <text class="svg-text" x="790" y="362" text-anchor="middle" font-size="14">Sentry</text>
+        <text class="svg-muted" x="790" y="382" text-anchor="middle" font-size="12">if DSN set</text>
+        <line class="arrow" x1="320" y1="256" x2="99" y2="330" marker-end="url(#ah)"></line>
+        <line class="arrow" x1="380" y1="256" x2="269" y2="330" marker-end="url(#ah)"></line>
+        <line class="arrow" x1="440" y1="256" x2="449" y2="330" marker-end="url(#ah)"></line>
+        <line class="arrow" x1="500" y1="256" x2="629" y2="330" marker-end="url(#ah)"></line>
+        <line class="arrow" x1="560" y1="256" x2="790" y2="330" marker-end="url(#ah)"></line>
+        <defs>
+          <marker id="ah" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+            <path d="M0,0 L8,4 L0,8 z" fill="currentColor"></path>
+          </marker>
+        </defs>
+      </svg>
+      <figcaption>Runtime topology. Preview versions from pull requests are the same Worker and share this D1 database and this KV namespace with production. The deploy workflow says so in the sticky comment.</figcaption>
+    </figure>
+    <h3>Bindings</h3>
+    <div class="table-scroll" tabindex="0" role="region" aria-labelledby="cap-bindings">
+      <table>
+        <caption id="cap-bindings">Worker bindings</caption>
+        <thead>
+          <tr><th scope="col">Name</th><th scope="col">Kind</th><th scope="col">Role</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>DB</code></td><td>D1 <code>htmlbin-db</code></td><td>Users, tokens, drops, versions, verifications, rate limits.</td></tr>
+          <tr><td><code>DROPS_KV</code></td><td>KV</td><td>HTML bodies and derived caches (markdown, OG PNG, OG fonts).</td></tr>
+          <tr><td><code>AI</code></td><td>Workers AI</td><td><code>toMarkdown()</code> for the landing page only. User drops are not converted.</td></tr>
+          <tr><td><code>PUBLIC_URL</code></td><td>var</td><td>Absolute origin used in every generated URL. Production value <code>https://htmlbin.aesir.works</code>.</td></tr>
+          <tr><td><code>GITHUB_CLIENT_ID</code></td><td>var, public</td><td>OAuth client id. The sentinel <code>dev-mock</code> enables the local short-circuit.</td></tr>
+          <tr><td><code>GITHUB_CLIENT_SECRET</code></td><td>secret</td><td>OAuth client secret. Unused on the mock path.</td></tr>
+          <tr><td><code>TOKEN_PEPPER</code></td><td>secret</td><td>Mixed into token hashes and used as the HMAC key for unlock cookies. Minimum length 32.</td></tr>
+          <tr><td><code>SENTRY_DSN</code></td><td>secret, optional</td><td>When unset, server tracing and <code>/sentry.js</code> no-op.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="prose">
+      <p>The default export is <code>Sentry.withSentry</code> around the Hono <code>fetch</code> handler. Sample rate <code>0.1</code>. <code>sendDefaultPii</code> is false. The DSN is read from the env at request time.</p>
+      <p>A zone-level Cloudflare Web Analytics beacon is injected into <code>text/html</code> responses at the edge, including <code>/p/:slug/raw</code>. That injection is not in the Worker. Pattern skeletons are served as <code>text/plain</code> so the beacon is not baked into HTML an agent will upload.</p>
+    </div>
+    <p class="src">Sources: wrangler.toml, src/types.ts, src/index.ts, src/patterns.ts, .github/workflows/deploy.yml</p>
+  </section>
+
+  <section id="pipeline">
+    <h2><span class="num">04</span>Request pipeline</h2>
+    <div class="prose">
+      <p>Two middlewares wrap every route. The security middleware calls <code>next()</code> first, then sets headers on the way out. The pepper middleware rejects the request before the route when the secret is missing or shorter than 32 characters.</p>
+    </div>
+    <figure tabindex="0">
+      <svg viewBox="0 0 760 520" role="img" aria-labelledby="fig-pipe-title">
+        <title id="fig-pipe-title">Order of work on one request: Sentry wrapper, security middleware, pepper check, route, then security headers.</title>
+        <rect class="box" x="230" y="16" width="300" height="48" rx="2"></rect>
+        <text class="svg-text" x="380" y="46" text-anchor="middle" font-size="14">Incoming request</text>
+        <rect class="box" x="180" y="88" width="400" height="48" rx="2"></rect>
+        <text class="svg-text" x="380" y="118" text-anchor="middle" font-size="14">Sentry.withSentry</text>
+        <rect class="box" x="140" y="160" width="480" height="56" rx="2"></rect>
+        <text class="svg-text" x="380" y="184" text-anchor="middle" font-size="14">Security middleware</text>
+        <text class="svg-muted" x="380" y="204" text-anchor="middle" font-size="12">calls next(), stamps headers after</text>
+        <rect class="box-red" x="170" y="244" width="420" height="64" rx="2"></rect>
+        <text class="svg-text" x="380" y="270" text-anchor="middle" font-size="14">TOKEN_PEPPER length ≥ 32?</text>
+        <text class="svg-muted" x="380" y="290" text-anchor="middle" font-size="12">else 503 server_misconfigured</text>
+        <rect class="box" x="200" y="340" width="360" height="56" rx="2"></rect>
+        <text class="svg-text" x="380" y="364" text-anchor="middle" font-size="14">Route handler</text>
+        <text class="svg-muted" x="380" y="384" text-anchor="middle" font-size="12">page, API, or discoverability</text>
+        <rect class="box-store" x="120" y="428" width="520" height="72" rx="2"></rect>
+        <text class="svg-text" x="380" y="456" text-anchor="middle" font-size="14">Response leaves with security headers</text>
+        <text class="svg-muted" x="380" y="478" text-anchor="middle" font-size="12">HSTS, nosniff, Referrer-Policy, Permissions-Policy, CSP</text>
+        <line class="arrow" x1="380" y1="64" x2="380" y2="88" marker-end="url(#ah2)"></line>
+        <line class="arrow" x1="380" y1="136" x2="380" y2="160" marker-end="url(#ah2)"></line>
+        <line class="arrow" x1="380" y1="216" x2="380" y2="244" marker-end="url(#ah2)"></line>
+        <line class="arrow" x1="380" y1="308" x2="380" y2="340" marker-end="url(#ah2)"></line>
+        <line class="arrow" x1="380" y1="396" x2="380" y2="428" marker-end="url(#ah2)"></line>
+        <defs>
+          <marker id="ah2" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+            <path d="M0,0 L8,4 L0,8 z" fill="currentColor"></path>
+          </marker>
+        </defs>
+      </svg>
+      <figcaption>A short or missing pepper fails closed on every path, including <code>/style.css</code> and the landing page. The 503 still receives the security headers, because that middleware is outside the check.</figcaption>
+    </figure>
+    <div class="prose">
+      <p>There is no CORS middleware. A browser page on another origin cannot call the API with the user's token. Adding CORS is a product decision, not a missing header.</p>
+      <p>Read routes that are registered with <code>app.on(["GET", "HEAD"], …)</code> answer HEAD. Mutations are method-specific. Unknown paths render the HTML 404 in <code>notFoundHtml()</code>, except API-shaped misses that call <code>apiError()</code> themselves (a bad pattern filename does).</p>
+    </div>
+    <p class="src">Sources: src/index.ts (both <code>app.use("*")</code> blocks and <code>app.notFound</code>)</p>
+  </section>
+
+  <section id="identifiers">
+    <h2><span class="num">05</span>Identifiers and crypto</h2>
+    <div class="prose">
+      <p>All randomness comes from <code>crypto.getRandomValues</code>. Base62 strings are built by taking each random byte modulo 62. The alphabet is <code>0-9A-Za-z</code>. Human codes use a 32-character alphabet that omits <code>I</code>, <code>O</code>, <code>0</code>, and <code>1</code>.</p>
+    </div>
+    <div class="table-scroll" tabindex="0" role="region" aria-labelledby="cap-ids">
+      <table>
+        <caption id="cap-ids">Identifier formats, from <code>src/crypto.ts</code> and <code>src/slug.ts</code></caption>
+        <thead>
+          <tr><th scope="col">Thing</th><th scope="col">Shape</th><th scope="col">Notes</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Slug</td><td>9 chars base62</td><td><code>generateSlug</code> ignores the title argument. Accepted slugs are <code>/^[A-Za-z0-9]{6,12}$/</code> so older lengths still resolve. Collision check retries up to 5 times.</td></tr>
+          <tr><td>User id</td><td><code>u_</code> + 16 base62</td><td>Primary key of <code>users</code>. Stable across tokens and devices.</td></tr>
+          <tr><td>API token</td><td><code>hb_</code> + 40 base62</td><td>Shown to the agent once. Stored as <code>SHA-256(pepper :: token)</code> hex.</td></tr>
+          <tr><td>Poll token</td><td>48 base62</td><td>Query secret for <code>GET /api/auth/poll</code>. Not an API token.</td></tr>
+          <tr><td>Verify code</td><td><code>XXXX-XXXX</code></td><td>Uppercase human alphabet. 10 minute TTL. Also the OAuth <code>state</code>.</td></tr>
+          <tr><td>Token id</td><td>12 hex chars</td><td><code>substr(token_hash, 1, 12)</code>. This is what <code>DELETE /api/tokens/:id</code> accepts. It is not a prefix of the plaintext token.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <h3>Hashes and cookies</h3>
+    <div class="prose">
+      <ul>
+        <li>API tokens: SHA-256 of the UTF-8 string <code>${pepper}::${token}</code>, hex. Lookup requires <code>revoked_at IS NULL</code>.</li>
+        <li>Passcodes: PBKDF2-HMAC-SHA-256, 100,000 iterations, 16-byte salt, 256-bit output, both salt and hash stored as hex in <code>password_salt</code> and <code>password_hash</code>. Comparison is a constant-time XOR over the hex strings.</li>
+        <li>Unlock cookie name: <code>wu_&lt;slug&gt;</code>. Value: <code>${slug}.${expEpochMs}.${hmac}</code>. HMAC-SHA-256 over the string <code>${slug}|${exp}</code>, key <code>TOKEN_PEPPER</code>. <code>Path=/p/&lt;slug&gt;</code>, <code>HttpOnly</code>, <code>Secure</code>, <code>SameSite=Lax</code>, <code>Max-Age</code> 86400. Verification rejects a mismatched slug, a non-numeric expiry, an expiry before <code>Date.now()</code>, or a bad MAC.</li>
+      </ul>
+      <p>The same pepper is the token salt and the cookie key. The HTML body is not encrypted with it. A passcode does not wrap the KV object.</p>
+    </div>
+    <p class="src">Sources: src/crypto.ts, src/slug.ts, src/auth.ts, src/index.ts unlock handlers</p>
+  </section>
+
+  <section id="data">
+    <h2><span class="num">06</span>Data model</h2>
+    <div class="prose">
+      <p><code>schema.sql</code> is the idempotent definition for a fresh database. Databases that already exist take <code>migrations/0001-github-oauth.sql</code> (GitHub columns and the partial unique index) and <code>migrations/0002-drop-metadata.sql</code> (the <code>metadata</code> column). Timestamps are Unix epoch milliseconds from <code>Date.now()</code>.</p>
+    </div>
+    <figure tabindex="0">
+      <svg viewBox="0 0 880 390" role="img" aria-labelledby="fig-er-title">
+        <title id="fig-er-title">Entity relationships. One user has many tokens and many drops. One drop has many versions. Verifications and rate limits stand alone.</title>
+        <rect class="box-red" x="24" y="24" width="200" height="88" rx="2"></rect>
+        <text class="svg-text" x="40" y="52" font-size="15">users</text>
+        <text class="svg-muted" x="40" y="76" font-size="12">id PK · github_user_id</text>
+        <text class="svg-muted" x="40" y="94" font-size="12">partial UNIQUE</text>
+        <rect class="box" x="300" y="16" width="230" height="78" rx="2"></rect>
+        <text class="svg-text" x="316" y="44" font-size="15">tokens</text>
+        <text class="svg-muted" x="316" y="68" font-size="12">token_hash PK · user_id FK</text>
+        <rect class="box" x="300" y="140" width="250" height="100" rx="2"></rect>
+        <text class="svg-text" x="316" y="168" font-size="15">drops</text>
+        <text class="svg-muted" x="316" y="192" font-size="12">slug PK · user_id FK</text>
+        <text class="svg-muted" x="316" y="212" font-size="12">latest_version · metadata JSON</text>
+        <rect class="box-store" x="620" y="140" width="236" height="100" rx="2"></rect>
+        <text class="svg-text" x="636" y="168" font-size="15">versions</text>
+        <text class="svg-muted" x="636" y="192" font-size="12">PK (slug, version)</text>
+        <text class="svg-muted" x="636" y="212" font-size="12">size_bytes · context</text>
+        <rect class="box" x="24" y="220" width="240" height="110" rx="2"></rect>
+        <text class="svg-text" x="40" y="248" font-size="15">verifications</text>
+        <text class="svg-muted" x="40" y="272" font-size="12">code PK · poll_token UNIQUE</text>
+        <text class="svg-muted" x="40" y="292" font-size="12">status · api_token (plaintext)</text>
+        <text class="svg-muted" x="40" y="312" font-size="12">until the poll claims it</text>
+        <rect class="box" x="300" y="280" width="250" height="78" rx="2"></rect>
+        <text class="svg-text" x="316" y="308" font-size="15">rate_limits</text>
+        <text class="svg-muted" x="316" y="332" font-size="12">bucket PK · count · window_start</text>
+        <line class="arrow" x1="224" y1="60" x2="300" y2="54" marker-end="url(#ah3)"></line>
+        <text class="svg-muted" x="236" y="44" font-size="11">1 — *</text>
+        <line class="arrow" x1="160" y1="112" x2="300" y2="170" marker-end="url(#ah3)"></line>
+        <text class="svg-muted" x="168" y="140" font-size="11">1 — *</text>
+        <line class="arrow" x1="550" y1="190" x2="620" y2="190" marker-end="url(#ah3)"></line>
+        <text class="svg-muted" x="560" y="180" font-size="11">1 — *</text>
+        <defs>
+          <marker id="ah3" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+            <path d="M0,0 L8,4 L0,8 z" fill="currentColor"></path>
+          </marker>
+        </defs>
+      </svg>
+      <figcaption>Cardinality. <code>verifications.user_id</code> is filled when GitHub sign-in succeeds. <code>existing_user_id</code> is in the schema comment as a retired “paste a token” transfer. The current OAuth callback does not write it.</figcaption>
+    </figure>
+    <div class="prose">
+      <p><code>users.github_user_id</code> is nullable so tokens minted before OAuth still resolve. The unique index is partial: <code>WHERE github_user_id IS NOT NULL</code>. New accounts always set it. <code>display_name</code> on create is the GitHub login.</p>
+      <p><code>drops.metadata</code> is a JSON text column, default <code>{}</code>. The public viewer never selects it into the HTML. <code>password_hash</code> and <code>password_salt</code> are the internal names of the passcode. The API field is <code>passcode</code>, and the JSON drop uses <code>locked: true|false</code> instead of returning the hash.</p>
+      <p><code>versions.context</code> is optional text, at most 64 KiB of UTF-8. It is per version. Replacing HTML with PUT stores a new context on the new version only. The owner API returns the context string from <code>GET /api/drops/:slug/v/:n</code>. The version list returns <code>has_context</code> and omits the body.</p>
+    </div>
+    <p class="src">Sources: schema.sql, migrations/0001-github-oauth.sql, migrations/0002-drop-metadata.sql, src/db.ts, src/github-oauth.ts</p>
+  </section>
+
+  <section id="auth">
+    <h2><span class="num">07</span>Authentication</h2>
+    <div class="prose">
+      <p>The flow is an OAuth device-code dance. The agent never sends the human to a signup form. The only human step is <code>/verify</code>, which is a GitHub sign-in bound to a verification code. One GitHub numeric id maps to one htmlbin user. A second machine, signed in with the same GitHub account, receives a new token on the same <code>user_id</code>. Quotas and drops stay with that user.</p>
+      <p>GitHub is asked for scope <code>read:user</code> only. The callback reads <code>id</code> and <code>login</code> from <code>https://api.github.com/user</code>. The verification code is the OAuth <code>state</code>. The callback re-reads the verification row and refuses it unless status is still <code>pending</code> and <code>expires_at</code> is in the future.</p>
+    </div>
+    <figure tabindex="0">
+      <svg viewBox="0 0 860 560" role="img" aria-labelledby="fig-auth-title">
+        <title id="fig-auth-title">Twelve-step device-code sequence. Each row names the sender, the receiver, and the message.</title>
+        <text class="svg-muted" x="16" y="22" font-size="12">STEP</text>
+        <text class="svg-muted" x="78" y="22" font-size="12">FROM</text>
+        <text class="svg-muted" x="250" y="22" font-size="12">TO</text>
+        <text class="svg-muted" x="430" y="22" font-size="12">WHAT CROSSES</text>
+        <line class="life" x1="12" y1="34" x2="848" y2="34"></line>
+        <text class="svg-num" x="16" y="62" font-size="14">01</text>
+        <text class="svg-text" x="78" y="62" font-size="14">Agent</text>
+        <text class="svg-muted" x="210" y="62" font-size="14">→</text>
+        <text class="svg-text" x="250" y="62" font-size="14">Worker</text>
+        <text class="svg-muted" x="430" y="62" font-size="14">POST /api/auth/start</text>
+        <text class="svg-num" x="16" y="102" font-size="14">02</text>
+        <text class="svg-text" x="78" y="102" font-size="14">Worker</text>
+        <text class="svg-muted" x="430" y="102" font-size="14">INSERT verifications, status pending</text>
+        <text class="svg-num" x="16" y="142" font-size="14">03</text>
+        <text class="svg-text" x="78" y="142" font-size="14">Worker</text>
+        <text class="svg-muted" x="210" y="142" font-size="14">→</text>
+        <text class="svg-text" x="250" y="142" font-size="14">Agent</text>
+        <text class="svg-muted" x="430" y="142" font-size="14">code, verification_url, poll_token</text>
+        <text class="svg-num" x="16" y="182" font-size="14">04</text>
+        <text class="svg-text" x="78" y="182" font-size="14">Agent</text>
+        <text class="svg-muted" x="210" y="182" font-size="14">→</text>
+        <text class="svg-text" x="250" y="182" font-size="14">Human</text>
+        <text class="svg-muted" x="430" y="182" font-size="14">print the code and the URL</text>
+        <text class="svg-num" x="16" y="222" font-size="14">05</text>
+        <text class="svg-text" x="78" y="222" font-size="14">Human</text>
+        <text class="svg-muted" x="210" y="222" font-size="14">→</text>
+        <text class="svg-text" x="250" y="222" font-size="14">Worker</text>
+        <text class="svg-muted" x="430" y="222" font-size="14">GET /verify?code=</text>
+        <text class="svg-num" x="16" y="262" font-size="14">06</text>
+        <text class="svg-text" x="78" y="262" font-size="14">Human</text>
+        <text class="svg-muted" x="210" y="262" font-size="14">→</text>
+        <text class="svg-text" x="250" y="262" font-size="14">Worker</text>
+        <text class="svg-muted" x="430" y="262" font-size="14">GET /auth/github/start?code=</text>
+        <text class="svg-num" x="16" y="302" font-size="14">07</text>
+        <text class="svg-text" x="78" y="302" font-size="14">Worker</text>
+        <text class="svg-muted" x="210" y="302" font-size="14">→</text>
+        <text class="svg-text" x="250" y="302" font-size="14">GitHub</text>
+        <text class="svg-muted" x="430" y="302" font-size="14">authorize, scope read:user, state=code</text>
+        <text class="svg-num" x="16" y="342" font-size="14">08</text>
+        <text class="svg-text" x="78" y="342" font-size="14">GitHub</text>
+        <text class="svg-muted" x="210" y="342" font-size="14">→</text>
+        <text class="svg-text" x="250" y="342" font-size="14">Worker</text>
+        <text class="svg-muted" x="430" y="342" font-size="14">callback, code and state</text>
+        <text class="svg-num" x="16" y="382" font-size="14">09</text>
+        <text class="svg-text" x="78" y="382" font-size="14">Worker</text>
+        <text class="svg-muted" x="210" y="382" font-size="14">→</text>
+        <text class="svg-text" x="250" y="382" font-size="14">GitHub</text>
+        <text class="svg-muted" x="430" y="382" font-size="14">exchange the code, GET /user</text>
+        <text class="svg-num" x="16" y="422" font-size="14">10</text>
+        <text class="svg-text" x="78" y="422" font-size="14">Worker</text>
+        <text class="svg-muted" x="430" y="422" font-size="14">upsert user, store hash, status verified</text>
+        <text class="svg-num" x="16" y="462" font-size="14">11</text>
+        <text class="svg-text" x="78" y="462" font-size="14">Agent</text>
+        <text class="svg-muted" x="210" y="462" font-size="14">→</text>
+        <text class="svg-text" x="250" y="462" font-size="14">Worker</text>
+        <text class="svg-muted" x="430" y="462" font-size="14">GET /api/auth/poll?token=</text>
+        <text class="svg-num" x="16" y="502" font-size="14">12</text>
+        <text class="svg-text" x="78" y="502" font-size="14">Worker</text>
+        <text class="svg-muted" x="210" y="502" font-size="14">→</text>
+        <text class="svg-text" x="250" y="502" font-size="14">Agent</text>
+        <text class="svg-muted" x="430" y="502" font-size="14">api_token once, later status claimed</text>
+        <line class="life" x1="12" y1="524" x2="848" y2="524"></line>
+      </svg>
+      <figcaption>Happy path. Step 7 is skipped when <code>GITHUB_CLIENT_ID</code> is <code>dev-mock</code>: the start route redirects straight at the callback with <code>mock_login</code>. The mock user id is the first four bytes of SHA-256(login), read as a big-endian uint32 with the high bit cleared (<code>&gt;&gt;&gt; 1</code>), so one login always maps to one id.</figcaption>
+    </figure>
+    <h3>Poll semantics</h3>
+    <div class="prose">
+      <p><code>POST /api/auth/start</code> accepts an optional JSON body. <code>label</code>, when it is a string, is sliced to 64 characters and later stored on the token row. A missing or non-JSON body is fine. The response is:</p>
+    </div>
+    <pre><code>{
+  "code": "AB3K-7NPQ",
+  "verification_url": "https://htmlbin.aesir.works/verify?code=AB3K-7NPQ",
+  "poll_token": "&lt;48 base62 chars&gt;",
+  "expires_in": 600,
+  "poll_interval": 2
+}</code></pre>
+    <div class="prose">
+      <p><code>GET /api/auth/poll?token=</code> returns HTTP 200 for every recognized poll, including pending, expired, and already-claimed. The body is <code>{ "status": "pending" | "expired" | "claimed" }</code>. The first time the row is <code>verified</code> and <code>api_token</code> is still set, the handler nulls the column, sets status to <code>claimed</code>, and returns <code>{ "status": "verified", "api_token", "user_id" }</code>. A missing poll token is 400 <code>token_required</code>. An unknown token is 404 <code>not_found</code>.</p>
+      <p>Expiry is applied when a poll sees <code>status = pending</code> and <code>expires_at</code> in the past. There is no background sweeper. A verified row that nobody polls keeps the plaintext API token in <code>verifications.api_token</code>. A pending row stays pending until something polls it.</p>
+      <p>Start is limited to 10 requests per minute per <code>CF-Connecting-IP</code> (bucket <code>auth:start:&lt;ip&gt;</code>). Poll is limited to 60 per minute per poll token (<code>auth:poll:&lt;token&gt;</code>). The callback is limited to 20 per minute per IP (<code>gh:cb:&lt;ip&gt;</code>) and, on failure, renders the verify HTML page rather than <code>apiError</code> JSON. GitHub exchange or <code>/user</code> failure is HTTP 502 HTML.</p>
+    </div>
+    <h3>Bearer middleware</h3>
+    <div class="prose">
+      <p><code>authMiddleware</code> is mounted on <code>/drops</code>, <code>/drops/*</code>, <code>/me</code>, <code>/tokens</code>, and <code>/tokens/*</code> under the <code>/api</code> prefix. The header must match <code>Bearer hb_</code> plus base62. Anything else is 401 <code>unauthorized</code>. An unknown or revoked hash is 401 <code>invalid_token</code>. On success the context user is <code>{ id, tokenHash }</code>. <code>last_used_at</code> is updated inside <code>waitUntil</code>, so the request does not wait for that write.</p>
+      <p>Agents are told to read the token from <code>./.htmlbin/token</code>, then <code>HTMLBIN_TOKEN</code>, then <code>~/.config/htmlbin/token</code>. The Worker does not read those paths. It only sees the Authorization header.</p>
+    </div>
+    <p class="src">Sources: src/auth.ts, src/github-oauth.ts, src/onboard.ts auth.steps, src/db.ts getUserByTokenHash</p>
+  </section>
+
+  <section id="drops">
+    <h2><span class="num">08</span>Drop API</h2>
+    <div class="prose">
+      <p>Mutating endpoints that change a drop return the full serialized drop. The exception is <code>DELETE /api/drops/:slug</code>, which returns 204 with an empty body. <code>DELETE /api/tokens/:id</code> is also 204. Field names are snake_case. List-of-drops is the only list that wraps <code>{ data, pagination }</code>. <code>GET /api/tokens</code> returns a bare array, including revoked rows.</p>
+    </div>
+    <pre><code>{
+  "slug": "aB3xK7gPq",
+  "title": "My page",
+  "description": "",
+  "url": "https://htmlbin.aesir.works/p/aB3xK7gPq",
+  "raw_url": "https://htmlbin.aesir.works/p/aB3xK7gPq/raw",
+  "locked": false,
+  "latest_version": 1,
+  "view_count": 0,
+  "metadata": {},
+  "created_at": 0,
+  "updated_at": 0
+}</code></pre>
+    <p class="prose"><code>metadata</code> is always present. Malformed JSON in the column degrades to <code>{}</code> inside <code>parseMetadata()</code>. <code>created_at</code> and <code>updated_at</code> are epoch milliseconds.</p>
+    <h3>Create, replace, patch</h3>
+    <figure tabindex="0">
+      <svg viewBox="0 0 880 300" role="img" aria-labelledby="fig-ver-title">
+        <title id="fig-ver-title">POST writes version 1. PUT appends the next version number and moves latest_version. PATCH does not touch KV.</title>
+        <rect class="box-red" x="20" y="30" width="250" height="70" rx="2"></rect>
+        <text class="svg-text" x="145" y="58" text-anchor="middle" font-size="14">POST /api/drops</text>
+        <text class="svg-muted" x="145" y="80" text-anchor="middle" font-size="12">requires title and html</text>
+        <rect class="box" x="315" y="30" width="250" height="70" rx="2"></rect>
+        <text class="svg-text" x="440" y="58" text-anchor="middle" font-size="14">PUT /api/drops/:slug</text>
+        <text class="svg-muted" x="440" y="80" text-anchor="middle" font-size="12">requires html, mints v+1</text>
+        <rect class="box" x="610" y="30" width="250" height="70" rx="2"></rect>
+        <text class="svg-text" x="735" y="58" text-anchor="middle" font-size="14">PATCH /api/drops/:slug</text>
+        <text class="svg-muted" x="735" y="80" text-anchor="middle" font-size="12">title, description, metadata</text>
+        <rect class="box-store" x="40" y="180" width="360" height="90" rx="2"></rect>
+        <text class="svg-text" x="220" y="214" text-anchor="middle" font-size="14">KV html:slug:vN</text>
+        <text class="svg-muted" x="220" y="238" text-anchor="middle" font-size="12">written by POST (v1) and PUT (vN)</text>
+        <rect class="box-store" x="460" y="180" width="380" height="90" rx="2"></rect>
+        <text class="svg-text" x="650" y="214" text-anchor="middle" font-size="14">D1 drops + versions</text>
+        <text class="svg-muted" x="650" y="238" text-anchor="middle" font-size="12">POST/PUT add a version · PATCH does not</text>
+        <line class="arrow" x1="120" y1="100" x2="160" y2="180" marker-end="url(#ah5)"></line>
+        <line class="arrow" x1="400" y1="100" x2="280" y2="180" marker-end="url(#ah5)"></line>
+        <line class="arrow" x1="735" y1="100" x2="650" y2="180" marker-end="url(#ah5)"></line>
+        <defs>
+          <marker id="ah5" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+            <path d="M0,0 L8,4 L0,8 z" fill="currentColor"></path>
+          </marker>
+        </defs>
+      </svg>
+      <figcaption>PUT with an <code>html</code> field is how a URL stays stable. PATCH that includes <code>html</code> returns 400 <code>metadata_only_on_patch</code>. PUT without <code>html</code> returns 400 <code>html_required</code>.</figcaption>
+    </figure>
+    <div class="prose">
+      <p>On create, the handler writes KV <code>html:&lt;slug&gt;:v1</code> first, then a D1 batch that inserts the drop and version 1. On PUT it writes <code>html:&lt;slug&gt;:v&lt;next&gt;</code> first, then a batch that inserts the version row and updates <code>latest_version</code>. KV and D1 are not one transaction. A D1 failure after the KV put leaves an unreferenced object.</p>
+      <p>Title and description limits use JavaScript string length: 200 and 500. HTML and context limits use UTF-8 byte length from <code>TextEncoder</code>: 2,097,152 and 65,536. Empty title is <code>title_required</code>. Empty HTML on create is <code>html_required</code>. Non-string JSON values for string fields are 400 <code>invalid_arg</code>.</p>
+      <p>PUT and PATCH treat omitted title, description, and metadata as “leave the column alone” via <code>COALESCE</code>. Metadata replace-whole: omit the field to keep it, send <code>{}</code> to clear it, send an object to overwrite the map. <code>null</code> is rejected.</p>
+      <p>Ownership checks return 404 <code>not_found</code> when the slug does not exist and 403 <code>forbidden</code> when it exists for another user. A slug that fails <code>isValidSlug</code> is 400 <code>invalid_slug</code> and is not looked up.</p>
+    </div>
+    <h3>Versions</h3>
+    <div class="prose">
+      <p>The next version number is <code>latest_version + 1</code>. Holes are not reused. The cap check is <code>latest_version &gt;= 200</code>, so deleting a middle version does not make room for version 201. Deleting the current head rewinds <code>latest_version</code> to the maximum remaining version number, and a later PUT can occupy that head number again.</p>
+      <p><code>DELETE /api/drops/:slug/v/:n</code> refuses when only one version row remains (409 <code>last_version_cannot_be_deleted</code>). Otherwise it deletes the KV key, deletes the version row, and if that row was the head, rewinds <code>latest_version</code>. The response is the updated drop.</p>
+      <p><code>DELETE /api/drops/:slug</code> deletes KV keys from version 1 through the current <code>latest_version</code> inclusive, then deletes version rows and the drop row in one D1 batch. A key whose number is above the current head is not visited by that loop. The head-delete path deletes that key before it rewinds the counter, so the ordinary case is covered.</p>
+    </div>
+    <h3>Reads for the owner</h3>
+    <div class="prose">
+      <ul>
+        <li><code>GET /api/me</code> returns <code>user_id</code>, <code>created_at</code>, <code>drop_count</code>, and the current token (<code>id</code>, <code>label</code>, <code>created_at</code>, <code>last_used_at</code>). It does not return the GitHub login.</li>
+        <li><code>GET /api/drops</code> filters to the caller. Query: <code>page</code> (default 1), <code>pageSize</code> (default 50, max 200), <code>sortBy</code> (<code>created_at</code>, <code>updated_at</code>, <code>view_count</code>), <code>sortOrder</code> (<code>asc</code> or <code>desc</code>). The <code>ORDER BY</code> column is chosen from that whitelist.</li>
+        <li><code>GET /api/drops/:slug/versions</code> returns version, size, <code>has_context</code>, <code>created_at</code>, <code>is_latest</code>. No HTML.</li>
+        <li><code>GET /api/drops/:slug/v/:n</code> adds the <code>context</code> string. Unknown version: 404 <code>version_not_found</code>.</li>
+      </ul>
+      <p>There is no server upsert. The advertised recipe is list-by-metadata, then PUT if a row matches, otherwise POST. The MCP tools for that recipe are <code>list_drops</code>, then <code>update_drop</code> or <code>create_drop</code>. Two parallel creators can both observe an empty list and both POST. The API does not serialize that.</p>
+    </div>
+    <p class="src">Sources: src/drops.ts, src/db.ts listDropsByUser, src/onboard.ts publish / iterate / list_my_drops</p>
+  </section>
+
+  <section id="rendering">
+    <h2><span class="num">09</span>Public rendering</h2>
+    <div class="prose">
+      <p><code>GET /p/:slug</code> is the human page. <code>GET /p/:slug/raw</code> is the document. The page loads the document in an iframe. The homepage embeds one real drop the same way: <code>SHOWCASE_SLUG</code> is the constant <code>ztx4J9P</code> in <code>src/views/landing.ts</code>, and the iframe source is <code>/p/ztx4J9P/raw</code>. Raw responses do not increment <code>view_count</code>, so that embed does not count as a view.</p>
+    </div>
+    <figure tabindex="0">
+      <svg viewBox="0 0 820 460" role="img" aria-labelledby="fig-read-title">
+        <title id="fig-read-title">Decision path for the public viewer and the raw document.</title>
+        <rect class="box" x="270" y="16" width="280" height="44" rx="2"></rect>
+        <text class="svg-text" x="410" y="44" text-anchor="middle" font-size="14">GET /p/:slug</text>
+        <rect class="box" x="250" y="84" width="320" height="44" rx="2"></rect>
+        <text class="svg-text" x="410" y="112" text-anchor="middle" font-size="13">slug matches ^[A-Za-z0-9]{6,12}$ ?</text>
+        <rect class="box" x="250" y="152" width="320" height="44" rx="2"></rect>
+        <text class="svg-text" x="410" y="180" text-anchor="middle" font-size="13">drops row exists?</text>
+        <rect class="box-red" x="230" y="220" width="360" height="52" rx="2"></rect>
+        <text class="svg-text" x="410" y="242" text-anchor="middle" font-size="13">password_hash set?</text>
+        <text class="svg-muted" x="410" y="260" text-anchor="middle" font-size="12">cookie wu_&lt;slug&gt; must verify</text>
+        <rect class="box" x="40" y="310" width="240" height="52" rx="2"></rect>
+        <text class="svg-text" x="160" y="340" text-anchor="middle" font-size="13">gate HTML, HTTP 200</text>
+        <rect class="box" x="300" y="310" width="240" height="52" rx="2"></rect>
+        <text class="svg-text" x="420" y="332" text-anchor="middle" font-size="13">viewer chrome</text>
+        <text class="svg-muted" x="420" y="350" text-anchor="middle" font-size="12">iframe → /raw</text>
+        <rect class="box-store" x="560" y="310" width="230" height="52" rx="2"></rect>
+        <text class="svg-text" x="675" y="340" text-anchor="middle" font-size="13">HTML 404</text>
+        <rect class="box-store" x="250" y="392" width="340" height="52" rx="2"></rect>
+        <text class="svg-text" x="420" y="414" text-anchor="middle" font-size="13">GET /raw</text>
+        <text class="svg-muted" x="420" y="432" text-anchor="middle" font-size="12">KV + safety net, or 302 if locked</text>
+        <line class="arrow" x1="410" y1="60" x2="410" y2="84" marker-end="url(#ah6)"></line>
+        <line class="arrow" x1="410" y1="128" x2="410" y2="152" marker-end="url(#ah6)"></line>
+        <line class="arrow" x1="410" y1="196" x2="410" y2="220" marker-end="url(#ah6)"></line>
+        <line class="arrow" x1="300" y1="272" x2="160" y2="310" marker-end="url(#ah6)"></line>
+        <line class="arrow" x1="410" y1="272" x2="420" y2="310" marker-end="url(#ah6)"></line>
+        <line class="arrow" x1="560" y1="120" x2="675" y2="310" marker-end="url(#ah6)"></line>
+        <line class="arrow" x1="420" y1="362" x2="420" y2="392" marker-end="url(#ah6)"></line>
+        <defs>
+          <marker id="ah6" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+            <path d="M0,0 L8,4 L0,8 z" fill="currentColor"></path>
+          </marker>
+        </defs>
+      </svg>
+      <figcaption>Invalid slug and missing drop on the public routes use the HTML 404, not the JSON error envelope. The gate page’s memo draws the words “401 Unauthorized”. The HTTP status of that response is 200.</figcaption>
+    </figure>
+    <div class="prose">
+      <p><code>?v=N</code> pins the viewer and the raw route when <code>N</code> is an integer from 1 through <code>latest_version</code>. Any other value is ignored and the latest version is served. The check does not confirm that the version row still exists. A deleted middle version in that range still selects that number; raw then 404s because the KV key is gone, while the chrome page still renders.</p>
+      <p>The viewer iframe is <code>sandbox="allow-scripts allow-forms allow-modals allow-downloads"</code>. <code>allow-same-origin</code> is absent, so scripts in the drop run in an opaque origin. The HTTP request that loads <code>/raw</code> is still a same-site request and still carries the unlock cookie, which is how a locked drop renders inside the frame after unlock.</p>
+      <p>The document title and <code>og:title</code> are <code>&lt;title trimmed to 15 words&gt; - &lt;slug&gt; - &lt;host&gt;</code>. A non-latest pin shows a banner. If the current version has <code>context</code>, a button reveals it in the chrome. The raw link opens the same version.</p>
+      <p>Author line: <code>getDropWithAuthor</code> left-joins <code>users.github_login</code>. A login becomes a link to <code>https://github.com/&lt;login&gt;</code>. A null login (legacy accounts) renders as “an agent”.</p>
+      <p><code>view_count</code> increments on the viewer route via <code>waitUntil</code>, including requests that receive the gate. Public viewer responses send <code>Cache-Control: public, max-age=60, s-maxage=900</code>, so a cache hit does not run the handler and does not bump the counter. Locked viewer responses send <code>private, no-store</code>. Raw sends <code>public, max-age=60, s-maxage=300</code>, or <code>private, no-store</code> when locked, plus <code>X-Robots-Tag: noindex</code>. The viewer HTML also sets <code>&lt;meta name="robots" content="noindex"&gt;</code>.</p>
+    </div>
+    <h3>Safety net on raw HTML</h3>
+    <div class="prose">
+      <p><code>injectMobileSafetyNet()</code> runs on every raw response. If no viewport meta is present it inserts <code>&lt;meta name="viewport" content="width=device-width, initial-scale=1"&gt;</code> after <code>&lt;head&gt;</code>, else after <code>&lt;html&gt;</code>, else at the start. It appends one style element before <code>&lt;/head&gt;</code>, else before <code>&lt;body&gt;</code>, else at the start:</p>
+    </div>
+    <pre><code>html,body{max-width:100vw;overflow-x:clip}
+img,svg{max-width:100%;height:auto}
+video,iframe{max-width:100%}
+pre,table{max-width:100%}
+pre{overflow-x:auto}</code></pre>
+    <p class="prose">The style tag carries <code>data-htmlbin-safety</code>. There is no opt-out flag. <code>overflow-x: clip</code> is intentional so the rule does not create a scroll container.</p>
+    <p class="src">Sources: src/index.ts viewer, raw, unlock; src/views/viewer.ts; src/views/landing.ts; src/safety-net.ts; src/db.ts bumpViewCount</p>
+  </section>
+
+  <section id="passcode">
+    <h2><span class="num">10</span>Passcode gate</h2>
+    <div class="prose">
+      <p>A passcode is a share gate. The KV object stays plaintext. Readers who do not present a valid <code>wu_&lt;slug&gt;</code> cookie see the gate on <code>/p/:slug</code> and are redirected from <code>/p/:slug/raw</code> back to that page. Unlock is <code>POST /p/:slug/unlock</code> with form field <code>passcode</code>. A match sets the cookie and redirects to the viewer. A miss re-renders the gate. Lock is <code>POST /p/:slug/lock</code>, which expires the cookie. The lock route does not check a CSRF token; its only effect is the caller’s own cookie.</p>
+      <p>The gate input is <code>type="text"</code> with <code>autocomplete="off"</code>. Masking is CSS <code>-webkit-text-security: disc</code> and the standard <code>text-security: disc</code>, with a show/hide control that toggles those properties. The placeholder is not masked.</p>
+      <p><code>POST /api/drops/:slug/passcode</code> with a string shorter than 4 characters returns 400 <code>passcode_too_short</code>. An empty string clears both hash columns. A missing or non-string <code>passcode</code> is 400 <code>passcode_required</code>. The create handler is different: any non-empty <code>passcode</code> string is hashed and stored, and <code>validateCreateBody()</code> does not apply the length floor. The onboard descriptor and the OpenAPI document both describe the create field as minimum length 4.</p>
+    </div>
+    <p class="src">Sources: src/index.ts, src/drops.ts, src/views/viewer.ts passcodeGatePage, src/styles.ts .gate-input, src/onboard.ts</p>
+  </section>
+
+  <section id="metadata">
+    <h2><span class="num">11</span>Metadata</h2>
+    <div class="prose">
+      <p>Metadata is an owner-side tag map. Keys match <code>/^[a-z0-9_]([a-z0-9_.-]{0,62}[a-z0-9_])?$/i</code>, at most 64 characters. Values are strings, at most 256 characters. At most 10 keys. Nested objects, arrays, and non-strings are <code>invalid_arg</code>. No key is reserved.</p>
+      <p>Filters are query keys <code>metadata.&lt;key&gt;=&lt;value&gt;</code>, ANDed. The SQL is <code>json_extract(metadata, ?) = ?</code> with the bound path <code>$.&lt;key&gt;</code> and the bound value. The filter key is checked with the same regex before it is bound. There is no secondary index. The <code>user_id</code> predicate is what keeps the scan small.</p>
+      <p>The map is drop-level. Versions do not snapshot it. Context is the per-version text channel.</p>
+    </div>
+    <p class="src">Sources: src/drops.ts validateMetadata, src/db.ts listDropsByUser, migrations/0002-drop-metadata.sql</p>
+  </section>
+
+  <section id="limits">
+    <h2><span class="num">12</span>Limits</h2>
+    <div class="prose">
+      <p><code>rateLimit()</code> in <code>src/db.ts</code> is a fixed window in D1. The window starts at <code>floor(now / windowMs) * windowMs</code>, so a “day” is 86,400,000 ms aligned to the Unix epoch, not a calendar day in a local timezone, and not a rolling 24 hours from the first hit. The check reads the row, then inserts or updates. Two overlapping requests can both pass the check. The comment in <code>db.ts</code> calls it best-effort.</p>
+      <p>When the limiter refuses, <code>retryAfter</code> is the whole seconds until the window ends, at least 1. Callers that use it set both the <code>Retry-After</code> header and <code>details.retry_after_seconds</code>.</p>
+    </div>
+    <div class="table-scroll" tabindex="0" role="region" aria-labelledby="cap-limits">
+      <table>
+        <caption id="cap-limits">Limits as the handlers enforce them</caption>
+        <thead>
+          <tr><th scope="col">Limit</th><th scope="col">Value</th><th scope="col">Where it is checked</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>HTML body</td><td>2,097,152 UTF-8 bytes</td><td>POST and PUT. 400 <code>html_too_large</code>.</td></tr>
+          <tr><td>Context</td><td>65,536 UTF-8 bytes</td><td>POST and PUT. 400 <code>context_too_large</code>.</td></tr>
+          <tr><td>Title / description</td><td>200 / 500 code units</td><td>POST, PUT, PATCH.</td></tr>
+          <tr><td>Drops per user</td><td>500 rows</td><td>POST only. 429 <code>quota_exceeded</code>. No <code>Retry-After</code>.</td></tr>
+          <tr><td>Version number</td><td><code>latest_version &gt;= 200</code></td><td>PUT only. 429 <code>version_limit_reached</code>. No <code>Retry-After</code>.</td></tr>
+          <tr><td>Writes per minute</td><td>60 per <code>user.id</code></td><td>Bucket <code>write:&lt;user id&gt;</code>. POST and PUT only. Shared by every token of that user.</td></tr>
+          <tr><td>Writes per epoch-day</td><td>500 per <code>user.id</code></td><td>Bucket <code>daily:&lt;user id&gt;</code>. POST only.</td></tr>
+          <tr><td>Auth start</td><td>10 / minute / IP</td><td><code>POST /api/auth/start</code>.</td></tr>
+          <tr><td>Auth poll</td><td>60 / minute / poll token</td><td><code>GET /api/auth/poll</code>.</td></tr>
+          <tr><td>GitHub callback</td><td>20 / minute / IP</td><td>HTML 429 page, not the JSON envelope.</td></tr>
+          <tr><td>Verification TTL</td><td>600 seconds</td><td>Enforced on start lookup and on poll of a pending row.</td></tr>
+          <tr><td>Metadata</td><td>10 keys, key 64, value 256</td><td>POST, PUT, PATCH, and list filters.</td></tr>
+          <tr><td>Passcode on the passcode route</td><td>minimum 4, or empty to clear</td><td><code>POST /api/drops/:slug/passcode</code>.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="prose">
+      <p>PATCH, drop delete, version delete, passcode changes, and token revoke do not consult <code>write:</code> or <code>daily:</code>. The onboard object publishes <code>writes_per_minute: 60</code> and <code>writes_per_day: 500</code> without naming the bucket or the methods. <code>llms.txt</code> says “60 writes / minute / token”. The bucket key is the user id.</p>
+    </div>
+    <p class="src">Sources: src/drops.ts constants and handlers, src/db.ts rateLimit, src/auth.ts, src/github-oauth.ts, src/onboard.ts limits</p>
+  </section>
+
+  <section id="errors">
+    <h2><span class="num">13</span>Errors</h2>
+    <div class="prose">
+      <p>API failures go through <code>apiError()</code>:</p>
+    </div>
+    <pre><code>{
+  "error": {
+    "code": "html_too_large",
+    "message": "HTML exceeds 2097152 bytes.",
+    "details": { "max_bytes": 2097152 }
+  }
+}</code></pre>
+    <div class="prose">
+      <p><code>details</code> is omitted when the caller does not pass it. Agents are told to switch on <code>code</code>. The legal codes are the <code>ErrorCode</code> union. Statuses used by that helper are 400, 401, 403, 404, 409, 413, 422, 429, 500, and 503. Not every code uses every status. Quota failures that are “too many” use 429. <code>last_version_cannot_be_deleted</code> uses 409.</p>
+      <p>Two JSON failures do not use this envelope. Landing markdown, when Workers AI throws, returns 503 <code>{ "error": "markdown_unavailable", "detail": "…" }</code>. A pepper failure does use <code>apiError</code> with <code>server_misconfigured</code>.</p>
+      <p>Public HTML routes (viewer, verify, favicon misses, the app 404) return HTML. GitHub start and callback errors return the verify page with an error string and statuses 400, 404, 409, 410, 429, or 502.</p>
+    </div>
+    <div class="table-scroll" tabindex="0" role="region" aria-labelledby="cap-err">
+      <table>
+        <caption id="cap-err">ErrorCode values declared in <code>src/errors.ts</code></caption>
+        <thead>
+          <tr><th scope="col">Code</th><th scope="col">Typical situation</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>invalid_json</code></td><td>Body is not JSON.</td></tr>
+          <tr><td><code>invalid_slug</code></td><td>Slug fails the 6–12 base62 check.</td></tr>
+          <tr><td><code>invalid_arg</code></td><td>Wrong field type, bad metadata, bad version number.</td></tr>
+          <tr><td><code>invalid_token_id</code></td><td>Revoke id is not 12 hex characters.</td></tr>
+          <tr><td><code>unauthorized</code></td><td>Missing or malformed bearer header.</td></tr>
+          <tr><td><code>invalid_token</code></td><td>Hash unknown or revoked.</td></tr>
+          <tr><td><code>forbidden</code></td><td>Drop belongs to another user.</td></tr>
+          <tr><td><code>not_found</code></td><td>Unknown drop, token id, poll token, or pattern file.</td></tr>
+          <tr><td><code>version_not_found</code></td><td>That version row is absent.</td></tr>
+          <tr><td><code>title_required</code></td><td>Missing or empty title.</td></tr>
+          <tr><td><code>title_too_long</code> / <code>description_too_long</code></td><td>Over 200 / 500.</td></tr>
+          <tr><td><code>html_required</code> / <code>html_too_large</code></td><td>PUT or POST body rules.</td></tr>
+          <tr><td><code>context_too_large</code></td><td>Over 64 KiB UTF-8.</td></tr>
+          <tr><td><code>passcode_required</code> / <code>passcode_too_short</code></td><td>Passcode route.</td></tr>
+          <tr><td><code>token_required</code></td><td>Poll called without <code>token</code>.</td></tr>
+          <tr><td><code>rate_limited</code></td><td>A window bucket is full. 429 with <code>Retry-After</code>.</td></tr>
+          <tr><td><code>daily_quota_exceeded</code></td><td>POST daily bucket. 429 with <code>Retry-After</code>.</td></tr>
+          <tr><td><code>quota_exceeded</code></td><td>500 drops. 429, no <code>Retry-After</code> in the handler.</td></tr>
+          <tr><td><code>version_limit_reached</code></td><td>Head is already 200. 429, no <code>Retry-After</code>.</td></tr>
+          <tr><td><code>last_version_cannot_be_deleted</code></td><td>409.</td></tr>
+          <tr><td><code>metadata_only_on_patch</code></td><td>PATCH body contained <code>html</code>.</td></tr>
+          <tr><td><code>server_misconfigured</code></td><td>Pepper missing or shorter than 32. 503.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="src">Sources: src/errors.ts, call sites in src/drops.ts, src/auth.ts, src/index.ts</p>
+  </section>
+
+  <section id="discover">
+    <h2><span class="num">14</span>Discoverability</h2>
+    <div class="prose">
+      <p>These routes are one contract. <code>buildOnboardJson()</code> is the protocol. <code>src/discoverability.ts</code> renders robots, llms.txt, the sitemap, the agent card, the OpenAPI 3.1 document, and the <code>Link</code> header on <code>GET /</code>. Skill bytes come from <code>src/skill.ts</code>. Pattern bytes come from <code>src/patterns.ts</code>. The OpenAPI document is handwritten in <code>openApiSpec()</code>. It is not generated from the route table.</p>
+      <p><code>GET /api/onboard</code> returns JSON. Markdown is served when <code>Accept</code> contains <code>text/markdown</code>, or when <code>?format=md</code>. Responses send <code>Vary: Accept</code>. The landing page uses a stricter check: markdown wins only when <code>text/markdown</code> appears and either <code>text/html</code> is absent or markdown appears first.</p>
+    </div>
+    <figure tabindex="0">
+      <svg viewBox="0 0 880 300" role="img" aria-labelledby="fig-disc-title">
+        <title id="fig-disc-title">Onboard JSON is the protocol. The other public documents are projections that must be updated with it.</title>
+        <rect class="box-red" x="330" y="110" width="220" height="70" rx="2"></rect>
+        <text class="svg-text" x="440" y="140" text-anchor="middle" font-size="14">/api/onboard</text>
+        <text class="svg-muted" x="440" y="160" text-anchor="middle" font-size="12">JSON by default</text>
+        <rect class="box" x="24" y="24" width="160" height="44" rx="2"></rect>
+        <text class="svg-text" x="104" y="52" text-anchor="middle" font-size="12">/openapi.json</text>
+        <rect class="box" x="200" y="24" width="200" height="44" rx="2"></rect>
+        <text class="svg-text" x="300" y="52" text-anchor="middle" font-size="12">agent-card.json</text>
+        <rect class="box" x="420" y="24" width="200" height="44" rx="2"></rect>
+        <text class="svg-text" x="520" y="52" text-anchor="middle" font-size="12">agent-skills</text>
+        <rect class="box" x="640" y="24" width="210" height="44" rx="2"></rect>
+        <text class="svg-text" x="745" y="52" text-anchor="middle" font-size="12">patterns catalog</text>
+        <rect class="box" x="24" y="220" width="150" height="44" rx="2"></rect>
+        <text class="svg-text" x="99" y="248" text-anchor="middle" font-size="12">/llms.txt</text>
+        <rect class="box" x="190" y="220" width="170" height="44" rx="2"></rect>
+        <text class="svg-text" x="275" y="248" text-anchor="middle" font-size="12">/robots.txt</text>
+        <rect class="box" x="376" y="220" width="160" height="44" rx="2"></rect>
+        <text class="svg-text" x="456" y="248" text-anchor="middle" font-size="12">/sitemap.xml</text>
+        <rect class="box" x="552" y="220" width="150" height="44" rx="2"></rect>
+        <text class="svg-text" x="627" y="248" text-anchor="middle" font-size="12">api-catalog</text>
+        <rect class="box" x="718" y="220" width="140" height="44" rx="2"></rect>
+        <text class="svg-text" x="788" y="248" text-anchor="middle" font-size="12">Link on /</text>
+        <line class="arrow" x1="400" y1="110" x2="120" y2="68" marker-end="url(#ah7)"></line>
+        <line class="arrow" x1="420" y1="110" x2="300" y2="68" marker-end="url(#ah7)"></line>
+        <line class="arrow" x1="460" y1="110" x2="520" y2="68" marker-end="url(#ah7)"></line>
+        <line class="arrow" x1="500" y1="110" x2="720" y2="68" marker-end="url(#ah7)"></line>
+        <line class="arrow" x1="380" y1="180" x2="110" y2="220" marker-end="url(#ah7)"></line>
+        <line class="arrow" x1="410" y1="180" x2="275" y2="220" marker-end="url(#ah7)"></line>
+        <line class="arrow" x1="450" y1="180" x2="456" y2="220" marker-end="url(#ah7)"></line>
+        <line class="arrow" x1="490" y1="180" x2="627" y2="220" marker-end="url(#ah7)"></line>
+        <line class="arrow" x1="520" y1="180" x2="770" y2="220" marker-end="url(#ah7)"></line>
+        <defs>
+          <marker id="ah7" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+            <path d="M0,0 L8,4 L0,8 z" fill="currentColor"></path>
+          </marker>
+        </defs>
+      </svg>
+      <figcaption>The fan-out. Several of these documents have drifted from the handlers. See section 20 before treating <code>llms.txt</code> or the agent-card summary as the protocol.</figcaption>
+    </figure>
+    <div class="prose">
+      <p>The sitemap lists <code>/</code>, <code>/api/onboard</code>, <code>/llms.txt</code>, and <code>/openapi.json</code>. <code>lastmod</code> is the UTC date at request time. Drop URLs are not included. <code>robots.txt</code> allows the major AI crawlers and disallows <code>/api/auth/</code> and <code>/verify</code>.</p>
+      <p><code>GET /.well-known/api-catalog</code> is RFC 9727 <code>application/linkset+json</code>. Its <code>status</code> link points at the agent card. There is no separate health route.</p>
+      <p><code>GET /.well-known/security.txt</code> is RFC 9116. Contact <code>security@htmlbin.aesir.works</code>. The expires value in the source is <code>2027-05-10T00:00:00.000Z</code>.</p>
+      <p>The agent-skills index follows the discovery schema <code>0.2.0</code>. One skill, name <code>htmlbin</code>, URL <code>/.well-known/agent-skills/htmlbin/SKILL.md</code>, digest <code>sha256:</code> of the bundled markdown. <code>POST /mcp</code> is advertised from the same discoverability surfaces.</p>
+    </div>
+    <p class="src">Sources: src/discoverability.ts, src/onboard.ts, src/skill.ts getSkillDigest / agentSkillsIndex, src/index.ts route table</p>
+  </section>
+
+  <section id="patterns">
+    <h2><span class="num">15</span>Patterns and skills</h2>
+    <div class="prose">
+      <p>Patterns are markdown the agent reads before it writes HTML. The Worker does not render them into a drop and does not validate uploaded HTML against them. The resolution order the skill teaches is: <code>./.htmlbin/patterns/*.md</code>, then <code>~/.config/htmlbin/patterns/*.md</code>, then <code>GET /.well-known/patterns/&lt;name&gt;.md</code>. The index is <code>GET /.well-known/patterns/index.json</code>.</p>
+      <p>Human-readable copies live in <code>patterns/</code>. The bytes the Worker serves are string constants in <code>src/patterns.ts</code>, because Wrangler 4 has been unreliable at importing non-JS files from outside <code>src/</code>. The same split exists for the skill: <code>skills/htmlbin/SKILL.md</code> and the template literal in <code>src/skill.ts</code>.</p>
+      <p>Official names and the triggers stored on <code>PatternMeta</code>:</p>
+      <ul>
+        <li><code>pr-explainer</code> — explain a pull request.</li>
+        <li><code>summary-roundup</code> — threads, weekly status, incident timelines.</li>
+        <li><code>plan-spec-explainer</code> — a plan or spec.</li>
+        <li><code>session-explainer</code> — an agent session. This one is prescriptive. Front matter sets <code>brand_sensing: true</code>, <code>brand_scope: colors-only</code>, and <code>template: session-explainer.template.html</code>. The index adds <code>template_url</code>. The template is served as <code>text/plain</code> so edge HTML rewriting does not inject a script into the skeleton.</li>
+      </ul>
+      <p><code>brand_scope</code> and <code>template</code> are extra front-matter keys. <code>brand_sensing</code> stays a boolean. Unknown keys are ignored, which is why the narrower rule is a second key.</p>
+    </div>
+    <p class="src">Sources: src/patterns.ts, patterns/session-explainer.md, src/skill.ts, src/index.ts pattern routes</p>
+  </section>
+
+  <section id="media">
+    <h2><span class="num">16</span>Fonts and OG images</h2>
+    <div class="prose">
+      <p>Page chrome uses Geist and Geist Mono. The woff2 files in <code>assets/fonts/</code> are base64-inlined into <code>src/fonts-data.ts</code> by <code>scripts/build-fonts.mjs</code>. <code>src/fonts.ts</code> decodes them once and <code>GET /fonts/:name</code> serves <code>font/woff2</code> with <code>Cache-Control: public, max-age=31536000, immutable</code>. CSS is also inlined into HTML via <code>STYLE_INLINE</code>. <code>GET /style.css</code> still exists, with the same immutable cache, and <code>STYLE_HREF</code> appends <code>?v=&lt;hash of the CSS&gt;</code>.</p>
+      <p>Social cards are PNG, 1200×630, drawn by <code>satori/standalone</code> and rasterized by <code>@resvg/resvg-wasm</code>. Both WASM modules ship as precompiled <code>WebAssembly.Module</code> values through <code>[[rules]] type = "CompiledWasm"</code>, because Workers reject <code>WebAssembly.compile</code>. The satori tree is built with small element helpers in <code>src/views/og-png.ts</code>. <code>satori-html</code> is listed in <code>package.json</code> and is not imported.</p>
+      <p>OG fonts are a different set from the page fonts: Geist 500, Geist Mono 400, and Geist Mono 500, fetched from jsDelivr <code>@fontsource</code> on a cold isolate, packed, and stored at KV <code>og-fonts:v1</code> for 30 days. The put is not awaited.</p>
+      <p><code>GET /og.png</code> caches <code>og-png:landing:v3</code> for 7 days. <code>GET /p/:slug/og.png</code> caches <code>og-png:&lt;slug&gt;:v&lt;latest_version&gt;:r3</code> for 30 days. Both responses use <code>Cache-Control: public, max-age=300, s-maxage=86400</code> and <code>X-Og-Cache: hit|miss</code>. If render throws, the handler logs and redirects to the SVG sibling. Nothing in <code>src/index.ts</code> reads a <code>debug</code> query. SVG variants are built in <code>src/views/og-image.ts</code> and do not use the WASM path.</p>
+      <p><code>/sentry.js</code> returns a comment when <code>SENTRY_DSN</code> is unset. When it is set, the script inserts <code>https://js.sentry-cdn.com/&lt;public key&gt;.min.js</code> and calls <code>Sentry.init</code> with <code>tracesSampleRate: 0.1</code>. The loader is referenced from the landing page, the verify page, and the viewer, including the gate. It is not injected into raw drop HTML by the Worker.</p>
+    </div>
+    <p class="src">Sources: src/fonts.ts, src/views/og-png.ts, src/views/og-image.ts, src/index.ts font and OG routes, wrangler.toml [[rules]]</p>
+  </section>
+
+  <section id="security">
+    <h2><span class="num">17</span>Security headers</h2>
+    <div class="prose">
+      <p>Every response, after the handler returns:</p>
+      <ul>
+        <li><code>Strict-Transport-Security: max-age=31536000; includeSubDomains; preload</code></li>
+        <li><code>X-Content-Type-Options: nosniff</code></li>
+        <li><code>Referrer-Policy: strict-origin-when-cross-origin</code></li>
+        <li><code>Permissions-Policy</code> disabling geolocation, camera, microphone, payment, and usb</li>
+      </ul>
+      <p>For <code>text/html</code>, if the handler has not already set <code>Content-Security-Policy</code>, the middleware adds <code>X-Frame-Options: SAMEORIGIN</code> and a CSP: <code>default-src 'self'</code>, images from <code>'self'</code> <code>data:</code> and <code>https:</code>, styles <code>'self' 'unsafe-inline'</code>, fonts <code>'self'</code>, scripts <code>'self' 'unsafe-inline'</code> plus <code>https://static.cloudflareinsights.com</code>, <code>connect-src 'self'</code>, <code>frame-src 'self'</code>, <code>frame-ancestors 'none'</code>, <code>base-uri 'none'</code>. When <code>SENTRY_DSN</code> is set, script-src also allows <code>js.sentry-cdn.com</code> and <code>browser.sentry-cdn.com</code>, and connect-src allows <code>https://*.ingest.sentry.io</code> and <code>https://*.ingest.us.sentry.io</code>.</p>
+      <p>JSON and <code>application/linkset+json</code> get <code>Content-Security-Policy: default-src 'none'</code> when the handler did not set one.</p>
+      <p>Raw HTML sets its own policy, so the middleware leaves that CSP in place and does not add <code>X-Frame-Options</code>. The raw policy is <code>frame-ancestors 'self'; base-uri 'none'; form-action 'self' https:</code>. The raw handler also sets <code>Referrer-Policy: no-referrer</code>. The middleware runs after the handler and sets <code>Referrer-Policy</code> on every response, so the value that leaves the Worker is <code>strict-origin-when-cross-origin</code>. The CSP check is the one header the middleware refuses to overwrite.</p>
+    </div>
+    <p class="src">Sources: src/index.ts security middleware and the raw response headers</p>
+  </section>
+
+  <section id="ops">
+    <h2><span class="num">18</span>Operations</h2>
+    <div class="prose">
+      <h3>Local</h3>
+      <p><code>npm run dev</code> runs Wrangler through <code>node node_modules/wrangler/bin/wrangler.js</code>. The <code>.bin</code> shim is a regular file whose path math misses <code>wrangler-dist</code>, which is why the npm scripts invoke the bin path directly. Local D1 state lives under <code>.wrangler/state/</code>. Fresh schema: <code>npm run db:apply:local</code>. Incremental files in <code>migrations/</code>: <code>npm run db:migrate:local</code>. <code>.dev.vars</code> supplies the pepper and, in the example, <code>GITHUB_CLIENT_ID=dev-mock</code>.</p>
+      <p><code>npm run test:e2e</code> runs <code>scripts/agent-e2e.sh</code> against <code>BASE_URL</code>, default <code>http://localhost:8787</code>. It walks discovery, device-code auth through the mock, CRUD, versions, context, passcodes, ownership, and cleanup. <code>npm run typecheck</code> is <code>tsc --noEmit</code>.</p>
+      <p><code>npm run dashboard</code> serves a read-only UI on <code>127.0.0.1:5173</code> that shells out to <code>wrangler d1 execute</code>. It is not mounted on the Worker. <code>npm run stats</code> is the text snapshot of the same idea.</p>
+      <h3>Deploy</h3>
+      <p><code>.github/workflows/deploy.yml</code> runs on push to <code>main</code> and on pull requests into <code>main</code>. It type-checks, runs <code>npm audit --omit=dev --audit-level=high</code>, then either <code>wrangler deploy</code> (push to <code>main</code>) or <code>wrangler versions upload</code> (pull request). The preview URL is scraped from the command output and posted as a sticky comment. Concurrency cancels a superseded pull-request run. A <code>main</code> deploy is not cancelled by a later run. Preview versions share production D1, KV, and AI bindings. The only GitHub secret the workflow reads is <code>CLOUDFLARE_API_TOKEN</code>.</p>
+      <p>Requests to <code>htmlbin.aesir.works/api/*</code> without a <code>User-Agent</code> are described in the operating manual as rejected by a Cloudflare ruleset with error 1010 before the Worker runs. That rule is not in this repository. Local Wrangler does not apply it.</p>
+    </div>
+    <h3>Cache and KV keys</h3>
+    <div class="table-scroll" tabindex="0" role="region" aria-labelledby="cap-cache">
+      <table>
+        <caption id="cap-cache">Derived KV objects and the HTTP cache on the route that writes or reads them</caption>
+        <thead>
+          <tr><th scope="col">Key</th><th scope="col">TTL</th><th scope="col">HTTP cache</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>html:&lt;slug&gt;:v&lt;n&gt;</code></td><td>until delete</td><td>Raw route: browser 60s, edge 300s, unless locked.</td></tr>
+          <tr><td><code>md:landing</code></td><td>3600s</td><td><code>/index.md</code> and negotiated <code>/</code>: browser 300s, edge 3600s, <code>Vary: Accept</code>.</td></tr>
+          <tr><td><code>og-png:landing:v3</code></td><td>7 days</td><td><code>/og.png</code>: browser 300s, edge 86400s.</td></tr>
+          <tr><td><code>og-png:&lt;slug&gt;:v&lt;n&gt;:r3</code></td><td>30 days</td><td>Same as landing PNG. <code>n</code> is <code>latest_version</code> at render time.</td></tr>
+          <tr><td><code>og-fonts:v1</code></td><td>30 days</td><td>Not an HTTP route. Read by the PNG renderer.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="prose">
+      <p>Other caches: landing HTML browser 60s and edge 300s; <code>/style.css</code> and fonts immutable for a year; discoverability documents mostly browser 300s and edge 3600s, robots and sitemap browser 3600s and edge 86400s; <code>/sentry.js</code> browser 3600s. Viewer edge cache is 900s for unlocked public drops.</p>
+    </div>
+    <p class="src">Sources: package.json, .github/workflows/deploy.yml, src/index.ts cache headers, CLAUDE.md “Cloudflare bot block”</p>
+  </section>
+
+  <section id="map">
+    <h2><span class="num">19</span>Source map</h2>
+    <div class="table-scroll" tabindex="0" role="region" aria-labelledby="cap-map">
+      <table>
+        <caption id="cap-map">Where to edit which behavior</caption>
+        <thead>
+          <tr><th scope="col">Path</th><th scope="col">Owns</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>src/index.ts</code></td><td>Route table, security headers, viewer, raw, unlock, OG HTTP, Sentry wrapper.</td></tr>
+          <tr><td><code>src/auth.ts</code></td><td>Device-code start and poll, bearer middleware.</td></tr>
+          <tr><td><code>src/github-oauth.ts</code></td><td>GitHub authorize, callback, dev mock, user upsert, token mint.</td></tr>
+          <tr><td><code>src/drops.ts</code></td><td>Authenticated drop and token API, validation, serialization.</td></tr>
+          <tr><td><code>src/db.ts</code></td><td>D1 queries and the rate-limit window.</td></tr>
+          <tr><td><code>src/crypto.ts</code></td><td>Tokens, hashes, unlock HMAC.</td></tr>
+          <tr><td><code>src/onboard.ts</code></td><td>Protocol JSON and the markdown twin.</td></tr>
+          <tr><td><code>src/discoverability.ts</code></td><td>robots, llms.txt, sitemap, agent card, OpenAPI, Link header.</td></tr>
+          <tr><td><code>src/skill.ts</code></td><td>Deployed skill markdown and the discovery index.</td></tr>
+          <tr><td><code>src/patterns.ts</code></td><td>Deployed pattern catalog and the session template.</td></tr>
+          <tr><td><code>src/safety-net.ts</code></td><td>CSS injected into raw HTML.</td></tr>
+          <tr><td><code>src/styles.ts</code></td><td>Shared CSS and the cache-busting href.</td></tr>
+          <tr><td><code>src/views/</code></td><td>Landing, verify, viewer, gate, favicon, SVG OG, PNG OG.</td></tr>
+          <tr><td><code>schema.sql</code>, <code>migrations/</code></td><td>D1 shape.</td></tr>
+          <tr><td><code>wrangler.toml</code></td><td>Name, routes, bindings, WASM rule.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="src">The file map in AGENTS.md matches this layout. CLAUDE.md is the longer operating manual and is left unchanged by this document.</p>
+  </section>
+
+  <section id="drift">
+    <h2><span class="num">20</span>Where documents disagree</h2>
+    <div class="prose">
+      <p>These are differences between a published string and the handler, as of commit <code>ac00be7</code>. They are documentation bugs or intentional looseness. This manual does not change them.</p>
+    </div>
+    <div class="table-scroll" tabindex="0" role="region" aria-labelledby="cap-drift">
+      <table>
+        <caption id="cap-drift">Spec or prose versus the code that runs</caption>
+        <thead>
+          <tr><th scope="col">Document</th><th scope="col">What it says</th><th scope="col">What the code does</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>llms.txt</code> limits</td><td>60 writes per minute per token.</td><td>Bucket <code>write:&lt;user.id&gt;</code>, 60 per minute, on POST and PUT. Daily 500 is POST only, same user id.</td></tr>
+          <tr><td><code>llms.txt</code> errors</td><td><code>{ "error": "&lt;code&gt;" }</code>, and a code <code>expired_code</code>.</td><td><code>{ error: { code, message, details? } }</code>. Expiry is poll HTTP 200 <code>{ "status": "expired" }</code>. <code>expired_code</code> is not an <code>ErrorCode</code>.</td></tr>
+          <tr><td><code>onboard</code> limits</td><td><code>writes_per_minute</code> 60 and <code>writes_per_day</code> 500.</td><td>True for the buckets above. PATCH, deletes, passcode, and token revoke do not use them.</td></tr>
+          <tr><td>Onboard and OpenAPI</td><td>Create-body passcode minimum length 4.</td><td>Enforced on <code>POST /api/drops/:slug/passcode</code> only. Create hashes any non-empty string.</td></tr>
+          <tr><td>Agent card summary</td><td>Onboard “returns the full agent protocol as markdown.”</td><td>Default content type is JSON. Markdown is opt-in.</td></tr>
+          <tr><td>CLAUDE.md OG section</td><td><code>?debug=1</code> surfaces the PNG error.</td><td>The catch block logs and redirects to the SVG. No query is read.</td></tr>
+          <tr><td><code>schema.sql</code> comment</td><td><code>existing_user_id</code> transfers an identity by pasting a token.</td><td>The OAuth callback never writes that column.</td></tr>
+          <tr><td>Gate memo in <code>viewer.ts</code></td><td>Renders “401 Unauthorized”.</td><td><code>GET /p/:slug</code> while locked is HTTP 200 HTML.</td></tr>
+          <tr><td>Landing markdown failure</td><td>The API error section says every 4xx/5xx uses <code>apiError</code>.</td><td>AI failure returns <code>{ error: "markdown_unavailable", detail }</code>.</td></tr>
+          <tr><td>Raw <code>Referrer-Policy</code></td><td>The raw handler sets <code>no-referrer</code>.</td><td>The outer middleware then sets <code>strict-origin-when-cross-origin</code> on every response.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="note-box">
+      <p>When you change a public behavior, update the handler and <code>buildOnboardJson()</code> together, then the skill literal and <code>skills/htmlbin/SKILL.md</code>, then <code>openApiSpec()</code>, <code>llmsTxt()</code>, and <code>agentCard()</code>. Pattern edits belong in both <code>patterns/</code> and <code>src/patterns.ts</code>.</p>
+    </div>
+    <p class="src">Sources: the files named in the table, compared with src/drops.ts, src/auth.ts, src/index.ts, and src/errors.ts</p>
+  </section>
+</main>
+</div>
+<footer class="footer">
+  <div class="footer-inner">
+    <p>htmlbin technical manual. Self-contained HTML. Not a route on the Worker. Describes commit <code>ac00be7</code>.</p>
+  </div>
+</footer>
+<script>
+(function () {
+  var links = Array.prototype.slice.call(document.querySelectorAll('nav[aria-label="Contents"] a'));
+  var sections = links.map(function (a) {
+    return document.querySelector(a.getAttribute('href'));
+  }).filter(Boolean);
+  if (!('IntersectionObserver' in window) || sections.length === 0) return;
+  var current = null;
+  var observer = new IntersectionObserver(function (entries) {
+    entries.forEach(function (entry) {
+      if (!entry.isIntersecting) return;
+      if (current === entry.target) return;
+      current = entry.target;
+      links.forEach(function (link) { link.removeAttribute('aria-current'); });
+      var match = document.querySelector('nav[aria-label="Contents"] a[href="#' + entry.target.id + '"]');
+      if (match) match.setAttribute('aria-current', 'true');
+    });
+  }, { rootMargin: '-20% 0px -70% 0px', threshold: 0 });
+  sections.forEach(function (section) { observer.observe(section); });
+})();
+</script>
+</body>
+</html>

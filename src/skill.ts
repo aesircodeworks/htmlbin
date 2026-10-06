@@ -1,0 +1,550 @@
+// Agent Skills Discovery (RFC v0.2.0).
+// Spec: https://github.com/cloudflare/agent-skills-discovery-rfc
+// Schema: https://schemas.agentskills.io/discovery/0.2.0/schema.json
+//
+// This module powers two endpoints:
+//   - GET /.well-known/agent-skills/index.json  → discovery index
+//   - GET /.well-known/agent-skills/htmlbin/SKILL.md → the skill itself
+//
+// SKILL.md content is mirrored in skills/htmlbin/SKILL.md for human
+// browsing. The deployed version is the constant below — keep them in
+// sync until we have a build step that imports the .md file directly.
+
+const SKILL_MD = `---
+name: htmlbin
+description: This skill should be used when the user wants to publish, share, or update self-contained HTML at a public URL via htmlbin (htmlbin.aesir.works). It covers the agent device-code auth flow, the live /api/onboard protocol descriptor, the standard token storage path, and the publish/update/list/delete operations. Trigger on phrases like "publish this HTML", "share this page at a URL", "drop this on htmlbin", "host this HTML somewhere", "give me a link for this page", or "list my htmlbin drops".
+---
+
+# htmlbin
+
+API for agents to share HTML. One human auth step, then headless publish.
+Live at \`https://htmlbin.aesir.works\`. Token prefix: \`hb_\`.
+
+## When to use
+
+Use this skill when the user asks to:
+
+- Publish, share, or "drop" generated HTML at a public URL
+- Update an existing htmlbin drop with new HTML (mints a new version)
+- Update title or description without re-uploading HTML
+- List previously published drops or look up a specific drop
+- Set or change a passcode on a drop
+- Delete a single version or the whole drop
+- Authorize a new machine against an existing identity
+
+Do **not** use this skill for:
+
+- Generating the HTML itself — htmlbin only hosts; produce HTML the usual way
+- Hosting non-HTML files (no JS bundles, no images at the public URL)
+- Backends, databases, or persistent server-side state
+
+## Source of truth: \`/api/onboard\`
+
+The live, authoritative protocol descriptor lives at:
+
+\`\`\`
+https://htmlbin.aesir.works/api/onboard
+\`\`\`
+
+It returns JSON by default with \`auth.steps[]\`, \`publish\`, \`iterate\`,
+\`list_my_drops\`, \`other_endpoints\`, \`error_shape\`, \`drop_shape\`, and \`limits\`.
+Markdown variant via \`Accept: text/markdown\` or \`?format=md\`.
+
+**Fetch this once per session before invoking htmlbin endpoints.** The
+descriptor is the contract; instructions in this skill may lag the API.
+When in doubt, prefer what \`/api/onboard\` says.
+
+## MCP
+
+\`POST /mcp\` is a Streamable HTTP endpoint. Send
+\`Authorization: Bearer hb_…\` on every request, including \`initialize\`.
+The token is the one from the device-code flow. GitHub sign-in happens
+once, at \`/verify\`, before that token exists. \`/mcp\` does not open a
+browser login.
+
+Tools: \`whoami\`, \`create_drop\`, \`get_drop\`, \`list_drops\`,
+\`update_drop\` (new version), \`patch_drop\` (metadata only),
+\`delete_drop\`, \`list_versions\`, \`get_version\`, \`delete_version\`,
+\`set_passcode\`.
+
+## Conventions
+
+- **All field names are snake_case** — \`raw_url\`, \`latest_version\`, \`created_at\`, \`view_count\`, etc.
+- **All 4xx/5xx responses share one shape.** Switch on \`error.code\` (not on \`error.message\`):
+
+\`\`\`json
+{
+  "error": {
+    "code": "html_too_large",
+    "message": "HTML exceeds 2097152 bytes.",
+    "details": { "max_bytes": 2097152 }
+  }
+}
+\`\`\`
+
+- **All mutating endpoints return the full Drop object** (or 204 No Content for full-drop delete). No need to re-fetch.
+- **Rate-limited responses (429)** carry a \`Retry-After\` header and \`details.retry_after_seconds\`.
+
+## Token storage
+
+Look for the API token in this order:
+
+1. \`./.htmlbin/token\` — project-local, **preferred** (no permission prompt
+   for agents that don't write outside cwd)
+2. \`HTMLBIN_TOKEN\` env var
+3. \`~/.config/htmlbin/token\` — machine-global fallback
+
+If no token is found in any of these locations, run the auth flow.
+
+Token format: \`hb_\` followed by base62 characters. Validation regex:
+\`^hb_[A-Za-z0-9]+$\`.
+
+## Auth: device-code flow (one-time, human-in-the-loop)
+
+The human moment is a **Sign in with GitHub** click — htmlbin binds one
+account per GitHub identity (\`read:user\` scope only: public username +
+numeric id). Cycling tokens recycles the same account, so quotas and
+existing drops follow the human across devices.
+
+\`\`\`
+POST /api/auth/start         → { code, verification_url, poll_token, expires_in, poll_interval }
+[print verification_url to human → they open it and sign in with GitHub]
+GET  /api/auth/poll?token=…  → { status, api_token? } once GitHub returns
+[save api_token to ./.htmlbin/token]
+\`\`\`
+
+Walkthrough:
+
+1. Start the auth flow:
+
+   \`\`\`bash
+   curl -s -X POST https://htmlbin.aesir.works/api/auth/start | jq
+   \`\`\`
+
+   Returns \`code\` (e.g. \`ABCD-EFGH\`), \`verification_url\`, \`poll_token\`,
+   \`expires_in\` (seconds), and \`poll_interval\` (seconds).
+
+2. Print the verification URL (and the code, for confirmation) so the
+   human can open it in a browser. They'll see a single "Sign in with
+   GitHub" button — that's the only thing they have to click. Example:
+
+   \`\`\`
+   To authorize htmlbin, open this URL and sign in with GitHub:
+     https://htmlbin.aesir.works/verify?code=ABCD-EFGH
+
+   Code: ABCD-EFGH
+   \`\`\`
+
+3. Poll for verification (codes expire after 10 minutes):
+
+   \`\`\`bash
+   curl -s "https://htmlbin.aesir.works/api/auth/poll?token=<poll_token>"
+   \`\`\`
+
+   Returns \`{ status: "pending" }\` until the human verifies, then
+   \`{ status: "verified", api_token: "hb_…", user_id: "..." }\` exactly once.
+
+4. Save the token:
+
+   \`\`\`bash
+   mkdir -p .htmlbin && printf "%s" "<api_token>" > .htmlbin/token
+   chmod 600 .htmlbin/token
+   \`\`\`
+
+**Linking a second machine to the same identity:** open \`/verify\` on the
+new machine and sign in with the same GitHub account. We bind one htmlbin
+account per GitHub identity, so the new device's token attaches to the
+same \`user_id\` automatically.
+
+## Common operations
+
+All authenticated requests use \`Authorization: Bearer <token>\`.
+
+### Publish a new drop
+
+\`\`\`bash
+curl -s -X POST https://htmlbin.aesir.works/api/drops \\
+  -H "Authorization: Bearer $(cat .htmlbin/token)" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "title": "My page",
+    "description": "Optional subtitle",
+    "html": "<!doctype html><html>…</html>"
+  }'
+\`\`\`
+
+Returns the full Drop (HTTP 201):
+
+\`\`\`json
+{
+  "slug": "aB3xK7g",
+  "title": "My page",
+  "description": "Optional subtitle",
+  "url": "https://htmlbin.aesir.works/p/aB3xK7g",
+  "raw_url": "https://htmlbin.aesir.works/p/aB3xK7g/raw",
+  "locked": false,
+  "latest_version": 1,
+  "view_count": 0,
+  "metadata": {},
+  "created_at": 0,
+  "updated_at": 0
+}
+\`\`\`
+
+The MCP tool for this call is \`create_drop\`.
+
+### Update HTML — mint a new version (PUT)
+
+\`\`\`bash
+curl -s -X PUT "https://htmlbin.aesir.works/api/drops/<slug>" \\
+  -H "Authorization: Bearer $(cat .htmlbin/token)" \\
+  -H "Content-Type: application/json" \\
+  -d '{ "html": "<!doctype html>…revised…" }'
+\`\`\`
+
+**PUT requires \`html\`.** The slug never changes; \`latest_version\`
+increments. Old versions remain at \`/p/<slug>?v=N\`. Returns the full Drop.
+The MCP tool is \`update_drop\`.
+
+### Update title/description/metadata only (PATCH)
+
+\`\`\`bash
+curl -s -X PATCH "https://htmlbin.aesir.works/api/drops/<slug>" \\
+  -H "Authorization: Bearer $(cat .htmlbin/token)" \\
+  -H "Content-Type: application/json" \\
+  -d '{ "title": "Better title" }'
+\`\`\`
+
+PATCH never mints a new version. Including \`html\` in the body returns
+\`400 metadata_only_on_patch\` — use PUT instead. \`metadata\` (see below)
+can be updated here too. The MCP tool is \`patch_drop\`. Send \`metadata: {}\`
+to clear the tag bag.
+
+### List drops (paginated, filterable)
+
+\`\`\`bash
+curl -s -H "Authorization: Bearer $(cat .htmlbin/token)" \\
+  "https://htmlbin.aesir.works/api/drops?page=1&pageSize=50&sortBy=updated_at&sortOrder=desc"
+
+# Filter by metadata — repeated metadata.<key>=<value>, AND across pairs
+curl -s -H "Authorization: Bearer $(cat .htmlbin/token)" \\
+  "https://htmlbin.aesir.works/api/drops?metadata.repo=acme%2Fsite&metadata.pr=42"
+\`\`\`
+
+Response:
+
+\`\`\`json
+{
+  "data": [ /* Drop[] */ ],
+  "pagination": {
+    "page": 1, "page_size": 50,
+    "total_items": 142, "total_pages": 3,
+    "sort_by": "updated_at", "sort_order": "desc"
+  }
+}
+\`\`\`
+
+Query params: \`page\` (default 1), \`pageSize\` (default 50, max 200),
+\`sortBy\` (\`created_at\` | \`updated_at\` | \`view_count\`, default \`created_at\`),
+\`sortOrder\` (\`asc\` | \`desc\`, default \`desc\`). The MCP tool is
+\`list_drops\`; pass \`metadata\` as an object and \`page_size\` for the cap.
+
+### Set or change a passcode
+
+\`\`\`bash
+curl -s -X POST "https://htmlbin.aesir.works/api/drops/<slug>/passcode" \\
+  -H "Authorization: Bearer $(cat .htmlbin/token)" \\
+  -H "Content-Type: application/json" \\
+  -d '{ "passcode": "secret123" }'
+\`\`\`
+
+Pass \`"passcode": ""\` to remove. Returns the full updated Drop. The
+passcode is a soft share gate — readers without it see a "locked" page —
+not encryption.
+
+### Delete a single version
+
+\`\`\`bash
+curl -s -X DELETE "https://htmlbin.aesir.works/api/drops/<slug>/v/<n>" \\
+  -H "Authorization: Bearer $(cat .htmlbin/token)"
+\`\`\`
+
+Refused with \`409 last_version_cannot_be_deleted\` for the only remaining
+version. Returns the full updated Drop.
+
+### Delete the whole drop
+
+\`\`\`bash
+curl -s -X DELETE "https://htmlbin.aesir.works/api/drops/<slug>" \\
+  -H "Authorization: Bearer $(cat .htmlbin/token)"
+\`\`\`
+
+Returns \`204 No Content\`.
+
+### Who am I
+
+\`\`\`bash
+curl -s -H "Authorization: Bearer $(cat .htmlbin/token)" \\
+  https://htmlbin.aesir.works/api/me | jq
+\`\`\`
+
+Returns \`user_id\`, \`created_at\`, \`drop_count\`, and the calling token's
+\`{ id, label, created_at, last_used_at }\`.
+
+## Optional request fields
+
+- \`title\` (string, ≤200 chars) — human label, shown in viewer chrome and on the per-drop OG card
+- \`description\` (string, ≤500 chars) — subtitle in viewer chrome
+- \`passcode\` (string, ≥4 chars) — soft share gate, shown on \`/p/<slug>\` before the body
+- \`context\` (string, ≤64 KB) — the reasoning trace, prompt, or thinking that produced this version. **Opt-in only**: include only after the human has explicitly agreed, since it can include prompt content from the conversation.
+- \`metadata\` (object, ≤10 keys, string→string) — owner-side tag bag.
+  Free-form: tag drops with whatever lets you find them again later.
+  Filterable on the list endpoint, not exposed on the public viewer.
+  See "Tag your drops to find them later" below.
+
+## Tag your drops to find them later (metadata + lookup → mutate)
+
+The \`metadata\` field plus the \`GET ?metadata.<key>=<value>\` filter let
+you find a drop you tagged earlier and update it — without storing
+slugs anywhere client-side. **Tag with whatever fits the job.** A few
+example tag setups (the server has no opinion about your keys):
+
+- \`{repo: "foo/bar", pr: "42"}\` — stable preview URL across CI pushes
+  for one PR.
+- \`{session_id: "<chat-id>", kind: "deck"}\` — the artifact this
+  conversation produced, so a later turn can iterate the same drop.
+- \`{client: "acme", project: "rebrand", status: "draft"}\` — maintain
+  a portfolio of in-progress work for one end-user.
+- \`{kind: "spec", topic: "auth-rewrite"}\` — buckets to list later.
+
+No reserved keys. Convention only — the server validates shape, not
+names.
+
+**Lookup, then mutate.** GET with the tags, PUT the matching slug if
+one comes back, otherwise POST a new drop. Keep the same tag
+combination and the slug stays stable. There is no server-side upsert.
+The MCP tools are \`list_drops\`, then \`update_drop\` or \`create_drop\`.
+
+\`\`\`bash
+# Lookup → mutate (works for any tag combination)
+EXISTING=$(curl -s -H "Authorization: Bearer $(cat .htmlbin/token)" \\
+  "https://htmlbin.aesir.works/api/drops?metadata.client=acme&metadata.project=rebrand" \\
+  | jq -r '.data[0].slug // empty')
+
+if [ -n "$EXISTING" ]; then
+  jq -n --rawfile html /tmp/artifact.html '{html:$html}' \\
+  | curl -s -X PUT "https://htmlbin.aesir.works/api/drops/$EXISTING" \\
+      -H "Authorization: Bearer $(cat .htmlbin/token)" \\
+      -H "Content-Type: application/json" -d @-
+else
+  jq -n --rawfile html /tmp/artifact.html '{
+    title: "Q3 plan",
+    html: $html,
+    metadata: { client: "acme", project: "rebrand", status: "draft" }
+  }' | curl -s -X POST https://htmlbin.aesir.works/api/drops \\
+         -H "Authorization: Bearer $(cat .htmlbin/token)" \\
+         -H "Content-Type: application/json" -d @-
+fi
+\`\`\`
+
+If your shape can write in parallel for the same tag combination,
+serialize at the call site. For CI / PR previews specifically, set
+\`concurrency: group: pr-\${{ github.event.pull_request.number }}\` on
+the GitHub Actions workflow. Other shapes (per-session, per-client)
+usually don't race.
+
+Metadata replace semantics on PUT/PATCH: omit the field to leave it
+untouched, send \`{}\` to clear it, send \`{k:v}\` to overwrite the whole
+map. Limits: ≤10 keys, ≤64 chars per key (alphanumerics, \`_\`, \`.\`,
+\`-\`; no leading or trailing punctuation), ≤256 chars per value. Values
+must be strings — stringify numbers and booleans agent-side.
+
+## Rate limiting
+
+429 responses carry a \`Retry-After\` header and \`details.retry_after_seconds\`. Codes:
+
+- \`rate_limited\` — 60 writes/min/token
+- \`daily_quota_exceeded\` — 500 writes/day/token
+- \`quota_exceeded\` — 500 drops/account
+- \`version_limit_reached\` — 200 versions/drop
+
+## Limits
+
+Read live values from \`/api/onboard.limits\`; current defaults:
+
+- 2 MB / drop body
+- 64 KB / context per version
+- 200 versions / drop
+- 60 writes / minute / token
+- 500 writes / day / token
+- 500 drops / account
+- 10-min TTL on verification codes
+
+## URLs and conventions
+
+- Drop URL: \`https://htmlbin.aesir.works/p/<slug>\`
+- Specific version: \`https://htmlbin.aesir.works/p/<slug>?v=<n>\`
+- Raw HTML (no chrome): \`https://htmlbin.aesir.works/p/<slug>/raw\`
+- Per-drop OG card: \`https://htmlbin.aesir.works/p/<slug>/og.svg\` (or \`.png\`)
+- Slugs are 7-char base62: \`^[A-Za-z0-9]{7}$\`
+- Tokens are \`hb_\` + base62: \`^hb_[A-Za-z0-9]+$\`
+
+## Quality floor
+
+These apply to every drop regardless of pattern or brand context. They're not pluggable — htmlbin's stance on what a good drop is.
+
+- **Mobile-OK at 360px.** The page must not scroll horizontally on a small phone. This is the most common failure mode — agents render at desktop and ship without checking. Concrete floor:
+  - \`<meta name="viewport" content="width=device-width, initial-scale=1">\` in every \`<head>\`. Without it, mobile Safari renders at 980px and pinches to fit.
+  - **Single column** at <640px. No multi-column grids, no side-by-side cards. Collapse \`grid-template-columns\` to \`1fr\` under the breakpoint.
+  - **No fixed widths.** \`width: 800px\` is forbidden on layout containers. Use \`max-width\` paired with \`width: 100%\`. Top-level wrapper: \`max-width: min(720px, 100%)\`.
+  - **Long unbreakable strings wrap.** URLs, file paths, API endpoints, command lines, slugs, hashes — anything without spaces — will blow out the viewport unless you let them break. Apply \`overflow-wrap: anywhere\` (or \`word-break: break-word\`) to prose containers, table cells, and inline \`<code>\`.
+  - **\`<pre>\` / code blocks must not set page width.** Two acceptable patterns: (a) \`white-space: pre-wrap; overflow-wrap: anywhere\` for short snippets where wrapping is fine, or (b) \`overflow-x: auto; max-width: 100%\` on the \`<pre>\` itself for code where line breaks matter (the block scrolls internally, the page doesn't). Pick one per block; never let a \`<pre>\` push the body wider.
+  - **Tables don't set page width either.** Under 640px, either restyle as stacked rows (\`table, tbody, tr, td { display: block }\` with per-cell labels) or wrap the \`<table>\` in a container with \`overflow-x: auto\`. A wide \`<table>\` left alone will push the document wider than the viewport.
+  - **Media is fluid.** \`img, svg, video, iframe { max-width: 100%; height: auto }\` (height auto only for raster — keep aspect ratio for video/iframe with \`aspect-ratio\`).
+  - **Belt and braces:** \`html, body { overflow-x: hidden }\` as a last-resort guard against a stray descendant. Don't rely on this — fix the descendant — but ship with it on.
+  - **Tap targets** (links, buttons, summary toggles) ≥44×44px in interactive chrome.
+  - Mentally test at **360px** (smallest common phone) and **768px** (tablet) before declaring done. If you have a way to actually render and screenshot, do that — it's the single highest-value check.
+  - **Note:** htmlbin appends a small safety stylesheet at the tail of \`<head>\` on every served drop (\`html,body{overflow-x:clip;max-width:100vw}\` plus fluid \`img/svg/video/iframe\` and \`max-width:100%\` on \`<pre>\`/\`<table>\`). It's a floor against the most common break, not a substitute for designing mobile-first. Your drop should look good without it.
+- Semantic HTML — real \`<h1>\`, real \`<details>\`, real \`<table>\` when tabular.
+- \`prefers-color-scheme\` aware (light + dark).
+- Inline \`<style>\`; external deps limited to well-known CDNs (Google Fonts, esm.sh, Tailwind CDN).
+- No fake mac chrome (traffic-light dots etc.) — the htmlbin landing prompt is the *one* product-wide exception; user drops don't get it.
+- No stock illustrations, no AI-generated photos.
+- No emoji unless the user's brand uses them.
+- Footer line: small mono, "published via htmlbin.aesir.works". Keep it understated.
+
+## Visualizing data
+
+When a drop includes charts, tables, or any quantitative graphic, lean on the established canon — don't reinvent it. The references below cover the vast majority of judgment calls:
+
+- **Edward Tufte — _The Visual Display of Quantitative Information_** ([edwardtufte.com/book/the-visual-display-of-quantitative-information](https://www.edwardtufte.com/book/the-visual-display-of-quantitative-information/)). Canonical text. Principles to respect: maximize data-ink ratio, eliminate chartjunk (gridlines, 3D, decoration), prefer small multiples over one cluttered chart, never lie with truncated or dual axes.
+- **[data-to-viz.com](https://www.data-to-viz.com/)** — chart-type chooser. Pick the chart type from your data shape *before* you draw. Bookmark; don't memorize.
+- **["Friends Don't Let Friends Make Bad Graphs"](https://github.com/cxli233/FriendsDontLetFriends)** — punchy practical do/don't list with worked examples. Skim before any data-heavy drop.
+- **[Datawrapper Academy](https://academy.datawrapper.de/)** — short, opinionated articles on color, axes, annotation, and labeling. Closest thing to a working stylebook.
+
+Concrete floor for charts in drops:
+
+- **Label axes with units.** No naked numbers.
+- **Direct-label series** (≤6 series) instead of a separate legend.
+- **Use the brand accent for the data**, neutral grey for axes, gridlines, and chrome.
+- **No 3D**, **no pies with >5 slices**, **no rainbow palettes for ordered data** (use Viridis, Cividis, or a sequential brand-tinted scale).
+- **Provide a fallback \`<table>\` inside collapsed \`<details>\`** when the chart is load-bearing — for screen readers and for agents reading the page back.
+- **Cite the source** under each chart in small mono: \`source: <url>\` or \`source: agent synthesis\` when the data is the agent's own.
+- **Mobile**: stack legends below, hide non-essential gridlines, ensure tap targets ≥44px if interactive.
+
+If a chart wouldn't survive a "what's wrong with this graphic?" critique, it shouldn't ship.
+
+## Make it feel like the user's own
+
+Drops should look like they belong to the human publishing them, not like a generic htmlbin template. Read brand signals from the cwd in this order — first non-empty source wins:
+
+1. **Design doc** — \`DESIGN.md\`, \`STYLE.md\`, \`BRAND.md\`, \`docs/DESIGN.md\`, \`docs/design-system.md\`. Skim for palette, typography, mood, voice. Highest-signal because it's deliberate.
+2. **Allowlist signals** — \`package.json\` (name, description, keywords, homepage), \`README.md\` first paragraph, the git remote host/org, any public website URL surfaced in the above.
+3. **Heuristic** — look around the cwd at the kind of metadata you'd cite to a code reviewer. Apply taste from that.
+4. **\`.htmlbin/brand.json\`** — optional explicit override: \`{ palette?, type?, mood?, reference_url? }\`. All fields optional.
+5. **Neutral fallback** — when nothing else is available: "editorial cream", "technical mono", or "blueprint navy". Pick one per drop, don't mix.
+
+**Do not read** \`.env*\`, \`~/.ssh/*\`, \`.git/credentials\`, or any file path containing \`secret\`, \`credential\`, \`token\`, or \`key\`. Read-only signals; never quote private content into the drop body.
+
+**Derive taste, don't impersonate.** If the user works at a company with a well-known visual language, capture the *energy* (playful, monochrome, gradient-heavy, whatever it is) without copying their public website pixel-for-pixel. Drops that look like a copy of someone else's site are the wrong outcome.
+
+**The human's prompt always wins.** Natural-language overrides ("make it dark", "match Stripe's vibe", "use serifs") trump everything above. Patterns and brand sensing are floors, not ceilings.
+
+## Patterns — local first, official as fallback
+
+Common drop kinds (PR explainers, summary roundups, plan/spec writeups, session explainers, …) ship as small markdown files anyone can author. Each pattern names triggers, a content checklist, layout directions, and a "don't" list. Read patterns to decide *structure*; use brand sensing (above) to decide *look*.
+
+**Where patterns live.** Resolve in this order — first match wins per pattern name:
+
+1. \`./.htmlbin/patterns/*.md\` — project-local. Highest priority.
+2. \`~/.config/htmlbin/patterns/*.md\` — machine-global (same dir as the token fallback).
+3. **Official catalog** — fetch from \`https://htmlbin.aesir.works/.well-known/patterns/index.json\` for the list, or \`https://htmlbin.aesir.works/.well-known/patterns/<name>.md\` for a specific one. Cache once per session.
+4. **No pattern at all** — freestyle within the quality floor. Always valid; patterns are starting floors, not requirements.
+
+**The official catalog today** — \`pr-explainer\` (a pull request, merge, or diff), \`summary-roundup\` (discussion threads, weekly status, incident timelines), \`plan-spec-explainer\` (a plan, spec, or design document), \`session-explainer\` (an agent session — the problem, the approach, the dead ends). Treat \`index.json\` as authoritative rather than this list: the catalog can grow between skill revisions.
+
+**Pattern file schema.** YAML front matter + markdown body. Authors write these in any text editor; no tooling required.
+
+\`\`\`markdown
+---
+name: pr-explainer
+description: One-line summary of what this pattern is for.
+triggers:
+  - explain this pr
+  - summarize this diff
+brand_sensing: true
+---
+
+# Title
+
+## When to use
+## Content checklist
+## Layout directions
+## How to pick
+## Don't
+\`\`\`
+
+**Picking a pattern.** Match the human's request against each installed pattern's \`triggers\` (case-insensitive substring or near-paraphrase). On multiple matches: project-local beats machine-global beats official; more-specific trigger beats less-specific. On no match: freestyle.
+
+**Prescriptive patterns.** Most patterns offer layout choices. A few fix the structure instead, because comparability across drops matters more than variety — those carry \`template: <name>.template.html\` in their front matter, and the catalog index exposes a \`template_url\` beside the usual \`url\`. Fetch that skeleton and fill its \`SLOT_*\` placeholders rather than authoring a layout: it is the pattern's structure expressed as working HTML. Such a pattern may also narrow \`brand_sensing\` (e.g. \`brand_scope: colors-only\`), meaning adapt the palette and type but leave the structure alone. \`session-explainer\` is the current example.
+
+**Authoring your own.** Drop a markdown file in \`./.htmlbin/patterns/\` (project-local) or \`~/.config/htmlbin/patterns/\` (machine-global). Share by pushing to a gist or repo; another agent installs with \`curl <url> > .htmlbin/patterns/<name>.md\`.
+
+**Why this shape.** Patterns are guidance the *agent* reads and applies — not server-rendered templates the platform serves. htmlbin's server stays thin; the long tail of drop kinds lives in user-space, where it belongs.
+
+## What htmlbin won't do (don't suggest these)
+
+- **No login UI, no signup, no email, no dashboard.** The device-code flow is the entire human-facing surface. Don't tell the user to "go to your dashboard" or "sign in" — there is none.
+- **No build pipeline, no SSR, no backend.** HTML uploads exactly as posted. Inline \`<script>\` runs client-side; that's the limit.
+- **No file types other than HTML.** No raw JS endpoints, no image hosting, no JSON serving.
+
+## Recommended workflow when invoked
+
+1. Check for an existing token in the standard locations.
+2. If no token, run the device-code flow (print code + URL clearly).
+3. Fetch \`/api/onboard\` once to confirm endpoint shapes for this session.
+4. **If generating new HTML:** pick a pattern (see "Patterns — local first, official as fallback") for structure; apply brand sensing (see "Make it feel like the user's own") for look. Both are floors, not ceilings — the human's prompt wins. Render within the quality floor.
+5. Execute the requested operation (publish / update / list / etc.).
+6. Surface the resulting URL (\`https://htmlbin.aesir.works/p/<slug>\`) to the user as the primary artifact.
+`;
+
+const SKILL_DESCRIPTION =
+  "Publish, share, or update self-contained HTML at a public URL via htmlbin (htmlbin.aesir.works). Covers the device-code auth flow, the live /api/onboard protocol descriptor, token storage conventions, and publish/update/list/delete operations (PUT for new version, PATCH for metadata). Trigger on phrases like 'publish this HTML', 'share this page at a URL', 'drop this on htmlbin', or 'list my htmlbin drops'.";
+
+let cachedDigest: string | null = null;
+
+async function sha256Hex(content: string): Promise<string> {
+  const data = new TextEncoder().encode(content);
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(hash))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+export async function getSkillDigest(): Promise<string> {
+  if (cachedDigest === null) {
+    cachedDigest = await sha256Hex(SKILL_MD);
+  }
+  return cachedDigest;
+}
+
+export function getSkillContent(): string {
+  return SKILL_MD;
+}
+
+export async function agentSkillsIndex(publicUrl: string): Promise<object> {
+  const digest = await getSkillDigest();
+  const host = publicUrl.replace(/\/$/, "");
+  return {
+    $schema: "https://schemas.agentskills.io/discovery/0.2.0/schema.json",
+    skills: [
+      {
+        name: "htmlbin",
+        type: "skill-md",
+        description: SKILL_DESCRIPTION,
+        url: `${host}/.well-known/agent-skills/htmlbin/SKILL.md`,
+        digest: `sha256:${digest}`,
+      },
+    ],
+  };
+}
