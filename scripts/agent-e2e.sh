@@ -660,6 +660,67 @@ curl -s "$BASE/api/drops" -H "Authorization: Bearer $TOKEN2" -o "$TMP/list2.json
 assert_json "$TMP/list2.json" '.data | length' '0' "second agent's list is empty"
 
 # ---------------------------------------------------------------------------
+section "6b. private drops (owner-only, GitHub sign-in on the viewer)"
+# ---------------------------------------------------------------------------
+PRIV_TITLE="e2e private $RANDOM$RANDOM"
+jq -n --rawfile h "$TMP/drop.html" --arg t "$PRIV_TITLE" '{title:$t, html:$h, visibility:"private"}' \
+| curl -s -X POST "$BASE/api/drops" \
+    -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+    -d @- -o "$TMP/priv.json"
+SLUG_P=$(jq -r .slug < "$TMP/priv.json")
+assert_json "$TMP/priv.json" '.visibility' 'private' "POST with visibility=private returns visibility=private"
+
+VBAD=$(curl -s -X PATCH "$BASE/api/drops/$SLUG_P" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"visibility":"secret"}')
+assert_contains "$VBAD" "invalid_arg" "unknown visibility value rejected"
+
+PCODE=$(curl -s -o "$TMP/priv-gate.html" -w "%{http_code}" "$BASE/p/$SLUG_P")
+assert_eq "$PCODE" "401" "anonymous view of a private drop → 401 gate"
+assert_contains "$(cat "$TMP/priv-gate.html")" "Private drop" "gate says the drop is private"
+assert_not_contains "$(cat "$TMP/priv-gate.html")" "$PRIV_TITLE" "gate never shows the title"
+assert_eq "$(curl -s -o /dev/null -w "%{http_code}" "$BASE/p/$SLUG_P/raw")" "302" "anonymous /raw of a private drop → 302"
+OGLOC=$(curl -s -o /dev/null -w "%{redirect_url}" "$BASE/p/$SLUG_P/og.png")
+assert_contains "$OGLOC" "/og.png" "private drop's OG card falls back to the site card"
+assert_not_contains "$(curl -s "$BASE/")" "/p/$SLUG_P\"" "a private drop is never listed on the homepage"
+
+# Owner signs in with the same GitHub identity that minted TOKEN.
+curl -s -L -c "$TMP/owner" -b "$TMP/owner" -o "$TMP/priv-owner.html" \
+  "$BASE/auth/github/owner?slug=$SLUG_P&mock_login=$GH_LOGIN_1"
+assert_contains "$(cat "$TMP/priv-owner.html")" "$PRIV_TITLE" "owner sign-in lands on the drop itself"
+assert_contains "$(cat "$TMP/priv-owner.html")" "sign out" "owner's viewer offers sign out"
+grep -q "hb_owner" "$TMP/owner" && ok "owner sign-in sets the hb_owner cookie" || fail "owner cookie" "missing"
+ORAW=$(curl -s -b "$TMP/owner" "$BASE/p/$SLUG_P/raw")
+assert_contains "$ORAW" "data-htmlbin-safety" "owner can load /raw"
+
+# A different GitHub account is signed in but still refused.
+curl -s -L -c "$TMP/other" -b "$TMP/other" -o /dev/null \
+  "$BASE/auth/github/owner?slug=$SLUG_P&mock_login=$GH_LOGIN_2"
+assert_eq "$(curl -s -o /dev/null -w "%{http_code}" -b "$TMP/other" "$BASE/p/$SLUG_P")" "403" "another account's session → 403"
+assert_eq "$(curl -s -o /dev/null -w "%{http_code}" -b "$TMP/other" "$BASE/p/$SLUG_P/raw")" "302" "another account's session can't load /raw"
+
+# A callback this browser didn't start (no state cookie) mints nothing.
+curl -s -c "$TMP/forged" -o /dev/null \
+  "$BASE/auth/github/callback?state=o_forged&code=mock&mock_login=$GH_LOGIN_1"
+grep -q "hb_owner\s" "$TMP/forged" && fail "forged owner callback" "cookie was set" || ok "owner callback without its state cookie sets no session"
+
+# A forged session cookie is ignored.
+assert_eq "$(curl -s -o /dev/null -w "%{http_code}" -H "Cookie: hb_owner=u_x.9999999999999.deadbeef" "$BASE/p/$SLUG_P")" "401" "forged hb_owner cookie is ignored"
+
+# Sign out drops the session.
+curl -s -c "$TMP/owner" -b "$TMP/owner" -o /dev/null -X POST "$BASE/auth/signout" --data-urlencode "slug=$SLUG_P"
+assert_eq "$(curl -s -o /dev/null -w "%{http_code}" -b "$TMP/owner" "$BASE/p/$SLUG_P")" "401" "after sign out, the gate is back"
+
+# Making it public again opens it to everyone and lists it.
+curl -s -X PATCH "$BASE/api/drops/$SLUG_P" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"visibility":"public"}' -o "$TMP/priv-pub.json"
+assert_json "$TMP/priv-pub.json" '.visibility' 'public' "PATCH visibility=public"
+assert_eq "$(curl -s -o /dev/null -w "%{http_code}" "$BASE/p/$SLUG_P")" "200" "public again → anyone can view"
+assert_contains "$(curl -s "$BASE/")" "/p/$SLUG_P\"" "public again → listed on the homepage"
+curl -s -X DELETE "$BASE/api/drops/$SLUG_P" -H "Authorization: Bearer $TOKEN" > /dev/null
+
+# ---------------------------------------------------------------------------
 section "7. cleanup"
 # ---------------------------------------------------------------------------
 DCODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$BASE/api/drops/$SLUG" \

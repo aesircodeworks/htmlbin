@@ -53,6 +53,9 @@ CREATE TABLE IF NOT EXISTS drops (
   -- existing drop by tag instead of memorizing slugs. Filtered via
   -- json_extract on GET /api/drops?metadata.k=v. Not exposed on /p/.
   metadata        TEXT NOT NULL DEFAULT '{}',
+  -- 'public' | 'private'. Private drops are viewable only by their owner,
+  -- signed in with GitHub on the viewer (see src/owner-session.ts).
+  visibility      TEXT NOT NULL DEFAULT 'public',
   created_at      INTEGER NOT NULL,
   updated_at      INTEGER NOT NULL,
   FOREIGN KEY(user_id) REFERENCES users(id)

@@ -122,6 +122,7 @@ export function buildOnboardJson(publicUrl: string): object {
         url: `${publicUrl}/p/aB3xK7gPq`,
         raw_url: `${publicUrl}/p/aB3xK7gPq/raw`,
         locked: false,
+        visibility: "public",
         latest_version: 3,
         view_count: 17,
         metadata: { repo: "u/r", pr: "42" },
@@ -143,6 +144,7 @@ export function buildOnboardJson(publicUrl: string): object {
         passcode: "string (optional, ≥4 chars; soft gate, not encryption — shown on /p/<slug> before the body)",
         context: "string (optional, ≤64 KB; reasoning trace — opt-in per the human)",
         metadata: "object (optional, ≤10 keys; flat string→string. Owner-side tag bag for lookup via GET /api/drops?metadata.k=v. Not exposed on /p/.)",
+        visibility: "\"public\" (default) | \"private\" — private drops are viewable only by the owner, who signs in with GitHub on /p/<slug>. Also settable on PUT and PATCH.",
       },
       returns: "Drop (see drop_shape)",
       status: 201,
@@ -479,6 +481,7 @@ Response (HTTP 201): the full \`Drop\` object:
   "url": "${publicUrl}/p/aB3xK7gPq",
   "raw_url": "${publicUrl}/p/aB3xK7gPq/raw",
   "locked": false,
+  "visibility": "public",
   "latest_version": 1,
   "view_count": 0,
   "created_at": 0,
@@ -629,6 +632,14 @@ curl -s -X DELETE ${publicUrl}/api/drops/<slug> \\
 Set, change, or remove a passcode via \`POST /api/drops/<slug>/passcode\` with
 \`{ "passcode": "..." }\`. Pass \`"passcode": ""\` to remove. This is a soft
 share gate — not encryption.
+
+## Private drops
+
+Send \`"visibility": "private"\` on \`POST\`, \`PUT\` or \`PATCH\` to make a drop
+owner-only. \`/p/<slug>\` then asks for a GitHub sign-in and shows the drop
+only to the GitHub account that owns it; everyone else sees a gate with no
+title. Private drops never appear in the homepage feed. Send
+\`"visibility": "public"\` to undo.
 
 ## Rate limiting
 

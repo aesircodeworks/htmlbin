@@ -1095,6 +1095,7 @@ iframe.canvas { border: 0; width: 100%; background: #fff; flex: 1; }
   transition: background 0.12s, border-color 0.12s;
 }
 .gate-submit:hover { background: var(--red); border-color: var(--red); }
+a.gate-submit { display: inline-block; text-decoration: none; }
 .gate-error {
   font-family: var(--mono); font-size: 12px;
   color: var(--red);

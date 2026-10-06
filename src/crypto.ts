@@ -124,6 +124,36 @@ export async function verifyUnlockToken(
   return constantTimeEqual(mac!, expected);
 }
 
+// Owner-session cookie for private drops: `${userId}.${expEpoch}.${hmacHex}`.
+// Parsed from the right so a user id containing "." can't shift the fields.
+// The MAC is domain-separated ("owner|…") from unlock cookies, which share
+// the same pepper.
+export async function signOwnerToken(
+  userId: string,
+  expEpoch: number,
+  pepper: string
+): Promise<string> {
+  const mac = await hmacHex(`owner|${userId}|${expEpoch}`, pepper);
+  return `${userId}.${expEpoch}.${mac}`;
+}
+
+// Returns the user id the cookie was issued to, or null if it's malformed,
+// expired, or forged.
+export async function verifyOwnerToken(
+  token: string,
+  pepper: string
+): Promise<string | null> {
+  const macAt = token.lastIndexOf(".");
+  const expAt = token.lastIndexOf(".", macAt - 1);
+  if (macAt <= 0 || expAt <= 0) return null;
+  const userId = token.slice(0, expAt);
+  const exp = Number(token.slice(expAt + 1, macAt));
+  const mac = token.slice(macAt + 1);
+  if (!Number.isFinite(exp) || exp < Date.now()) return null;
+  const expected = await hmacHex(`owner|${userId}|${exp}`, pepper);
+  return constantTimeEqual(mac, expected) ? userId : null;
+}
+
 async function hmacHex(message: string, secret: string): Promise<string> {
   const key = await crypto.subtle.importKey(
     "raw",

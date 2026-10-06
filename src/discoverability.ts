@@ -127,7 +127,7 @@ ${publicUrl}/.well-known/agent-skills/htmlbin/SKILL.md.
 - GET    /api/drops                  → list yours
 - GET    /api/drops/:slug            → metadata
 - PUT    /api/drops/:slug            → mints a new version
-- PATCH  /api/drops/:slug            → title / description / metadata only
+- PATCH  /api/drops/:slug            → title / description / metadata / visibility only
 - GET    /api/drops/:slug/versions   → list versions
 - GET    /api/drops/:slug/v/:n       → version metadata + context
 - DELETE /api/drops/:slug/v/:n       → delete one version
@@ -137,7 +137,7 @@ ${publicUrl}/.well-known/agent-skills/htmlbin/SKILL.md.
 - DELETE /api/tokens/:id             → revoke a token (id = first 12 hex)
 
 ### viewer
-- GET /p/:slug          → public viewer (latest version)
+- GET /p/:slug          → viewer (latest version); private drops ask the owner to sign in with GitHub
 - GET /p/:slug?v=N      → pinned to version N
 - GET /p/:slug/raw      → raw HTML, edge-cached
 - GET /p/:slug/raw?v=N  → raw HTML for a specific version
@@ -232,7 +232,7 @@ export function agentCard(publicUrl: string): object {
           "Upload self-contained HTML up to 2 MB; receive a permanent public URL. Creates v1. Returns the full Drop with status 201. Optional `metadata` (string→string, ≤10 keys) attaches owner-side tags for later lookup.",
         method: "POST",
         path: "/api/drops",
-        accepts: ["title", "description?", "html", "passcode?", "context?", "metadata?"],
+        accepts: ["title", "description?", "html", "passcode?", "context?", "metadata?", "visibility?"],
       },
       {
         id: "update_html",
@@ -240,7 +240,7 @@ export function agentCard(publicUrl: string): object {
           "PUT mints a NEW version on the same slug — URL is preserved across iterations. `html` is required; title/description/metadata optional. Metadata replace semantics: omit → untouched, {} → cleared.",
         method: "PUT",
         path: "/api/drops/:slug",
-        accepts: ["html", "title?", "description?", "context?", "metadata?"],
+        accepts: ["html", "title?", "description?", "context?", "metadata?", "visibility?"],
       },
       {
         id: "update_metadata",
@@ -248,7 +248,7 @@ export function agentCard(publicUrl: string): object {
           "PATCH updates title, description, and/or metadata without minting a new version. Returns 400 metadata_only_on_patch if `html` is included. Metadata replace semantics: omit → untouched, {} → cleared.",
         method: "PATCH",
         path: "/api/drops/:slug",
-        accepts: ["title?", "description?", "metadata?"],
+        accepts: ["title?", "description?", "metadata?", "visibility?"],
       },
       {
         id: "list_versions",
@@ -385,12 +385,19 @@ export function openApiSpec(publicUrl: string): object {
             url: { type: "string", format: "uri" },
             raw_url: { type: "string", format: "uri" },
             locked: { type: "boolean" },
+            visibility: { $ref: "#/components/schemas/Visibility" },
             latest_version: { type: "integer" },
             view_count: { type: "integer" },
             metadata: { $ref: "#/components/schemas/Metadata" },
             created_at: { type: "integer", description: "unix ms" },
             updated_at: { type: "integer", description: "unix ms" },
           },
+        },
+        Visibility: {
+          type: "string",
+          enum: ["public", "private"],
+          description:
+            "public (default): anyone with the URL can view. private: only the owner can view /p/<slug>, after signing in with the GitHub account that owns the drop; never listed in the homepage feed.",
         },
         Metadata: {
           type: "object",
@@ -676,6 +683,7 @@ export function openApiSpec(publicUrl: string): object {
                     passcode: { type: "string", minLength: 4, description: "Soft share gate, not encryption" },
                     context: { type: "string", description: "Optional reasoning trace (≤64KB, opt-in)" },
                     metadata: { $ref: "#/components/schemas/Metadata" },
+                    visibility: { $ref: "#/components/schemas/Visibility" },
                   },
                 },
               },
@@ -720,6 +728,7 @@ export function openApiSpec(publicUrl: string): object {
                     description: { type: "string", maxLength: 500 },
                     context: { type: "string", description: "Optional reasoning trace (≤64KB, opt-in)" },
                     metadata: { $ref: "#/components/schemas/Metadata" },
+                    visibility: { $ref: "#/components/schemas/Visibility" },
                   },
                 },
               },
@@ -745,6 +754,7 @@ export function openApiSpec(publicUrl: string): object {
                     title: { type: "string", maxLength: 200 },
                     description: { type: "string", maxLength: 500 },
                     metadata: { $ref: "#/components/schemas/Metadata" },
+                    visibility: { $ref: "#/components/schemas/Visibility" },
                   },
                 },
               },

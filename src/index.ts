@@ -8,7 +8,8 @@ import { buildOnboardJson, buildOnboardText } from "./onboard";
 import { landingPage } from "./views/landing";
 import { getRecentDropsCached } from "./recent";
 import { verifyPage } from "./views/verify";
-import { viewerPage, passcodeGatePage } from "./views/viewer";
+import { viewerPage, passcodeGatePage, privateGatePage } from "./views/viewer";
+import { getOwnerSession, isHiddenFrom } from "./owner-session";
 import { FAVICON_SVG } from "./views/favicon";
 import { OG_SVG, dropOgSvg } from "./views/og-image";
 import { renderDropOgPng, renderLandingOgPng } from "./views/og-png";
@@ -331,6 +332,8 @@ app.get("/p/:slug/og.svg", async (c) => {
   if (!isValidSlug(slug)) return c.notFound();
   const drop = await getDrop(c.env.DB, slug);
   if (!drop) return c.notFound();
+  // Private drops never show their title to unfurlers; use the site card.
+  if (drop.visibility === "private") return c.redirect("/og.svg", 302);
   const svg = dropOgSvg({
     slug: drop.slug,
     title: drop.title,
@@ -352,6 +355,7 @@ app.get("/p/:slug/og.png", async (c) => {
   if (!isValidSlug(slug)) return c.notFound();
   const drop = await getDrop(c.env.DB, slug);
   if (!drop) return c.notFound();
+  if (drop.visibility === "private") return c.redirect("/og.png", 302);
 
   const cacheKey = `og-png:${slug}:v${drop.latest_version}:r3`;
   const cached = await c.env.DROPS_KV.get(cacheKey, { type: "arrayBuffer" });
@@ -600,7 +604,26 @@ app.on(["GET", "HEAD"], "/p/:slug", async (c) => {
   const drop = await getDropWithAuthor(c.env.DB, slug);
   if (!drop) return c.notFound();
 
-  const locked = !!drop.password_hash;
+  // Private drops: only the owner, signed in with GitHub, gets past here.
+  // The owner also skips the passcode gate on their own drop.
+  const isPrivate = drop.visibility === "private";
+  if (isPrivate) {
+    c.header("Cache-Control", "private, no-store");
+    const session = await getOwnerSession(c.req.header("Cookie") ?? "", c.env.TOKEN_PEPPER);
+    if (isHiddenFrom(drop, session)) {
+      const signedInAs = session
+        ? (await c.env.DB.prepare(`SELECT github_login FROM users WHERE id = ?`)
+            .bind(session)
+            .first<{ github_login: string | null }>())?.github_login ?? null
+        : null;
+      return c.html(
+        privateGatePage(c.env, slug, { signedIn: !!session, signedInAs }),
+        session ? 403 : 401
+      );
+    }
+  }
+
+  const locked = !isPrivate && !!drop.password_hash;
   let unlocked = !locked;
   if (locked) {
     const cookie = getCookie(c.req.header("Cookie") ?? "", `wu_${slug}`);
@@ -638,7 +661,7 @@ app.on(["GET", "HEAD"], "/p/:slug", async (c) => {
   // approximation — view counts are vanity-ish; the Worker savings on
   // every repeat hit are real. Locked drops stay uncached because their
   // response depends on the unlock cookie state.
-  if (drop.password_hash) {
+  if (isPrivate || drop.password_hash) {
     c.header("Cache-Control", "private, no-store");
   } else {
     c.header("Cache-Control", "public, max-age=60, s-maxage=900");
@@ -657,6 +680,7 @@ app.on(["GET", "HEAD"], "/p/:slug", async (c) => {
       })),
       viewVersion,
       authorLogin: drop.author_login,
+      isPrivate,
     })
   );
 });
@@ -735,7 +759,12 @@ app.on(["GET", "HEAD"], "/p/:slug/raw", async (c) => {
   const drop = await getDrop(c.env.DB, slug);
   if (!drop) return c.notFound();
 
-  if (drop.password_hash) {
+  const isPrivate = drop.visibility === "private";
+  if (isPrivate) {
+    const session = await getOwnerSession(c.req.header("Cookie") ?? "", c.env.TOKEN_PEPPER);
+    // Same as a locked drop: never expose the HTML, send them to the gate.
+    if (isHiddenFrom(drop, session)) return c.redirect(`/p/${slug}`, 302);
+  } else if (drop.password_hash) {
     const cookie = getCookie(c.req.header("Cookie") ?? "", `wu_${slug}`);
     const ok =
       !!cookie &&
@@ -769,7 +798,7 @@ app.on(["GET", "HEAD"], "/p/:slug/raw", async (c) => {
   return new Response(body, {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
-      "Cache-Control": drop.password_hash
+      "Cache-Control": isPrivate || drop.password_hash
         ? "private, no-store"
         : "public, max-age=60, s-maxage=300",
       "X-Robots-Tag": "noindex",

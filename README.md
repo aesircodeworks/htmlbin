@@ -37,7 +37,8 @@ agent ─ GET  /api/auth/poll ───┘  → api_token (one-time read)
 agent ─ POST /api/drops  → slug, public URL
                                                   KV ──▶ HTML body
 visitor ─ GET /p/:id  → viewer + iframe           D1 ──▶ metadata
-                          (passcode gate if locked)
+                          (passcode gate if locked; GitHub
+                           sign-in gate if private)
 ```
 
 ## Quick start (local)
@@ -150,11 +151,11 @@ The landing page also sets a `Link:` HTTP header advertising all of the above.
 
 | Method | Path | Notes |
 |---|---|---|
-| `POST`   | `/api/drops` | `{title, description?, html, passcode?, context?, metadata?}` — creates v1 |
+| `POST`   | `/api/drops` | `{title, description?, html, passcode?, context?, metadata?, visibility?}` — creates v1. `visibility` is `"public"` (default) or `"private"` |
 | `GET`    | `/api/drops` | List your drops. Filter with repeated `metadata.<key>=<value>` (AND across pairs) |
 | `GET`    | `/api/drops/:slug` | Drop metadata |
-| `PUT`    | `/api/drops/:slug` | Mints a new version (slug + URL preserved). May also update `title`/`description`/`metadata` |
-| `PATCH`  | `/api/drops/:slug` | Update `title` / `description` / `metadata` without minting a version. `metadata` replaces the whole map |
+| `PUT`    | `/api/drops/:slug` | Mints a new version (slug + URL preserved). May also update `title`/`description`/`metadata`/`visibility` |
+| `PATCH`  | `/api/drops/:slug` | Update `title` / `description` / `metadata` / `visibility` without minting a version. `metadata` replaces the whole map |
 | `GET`    | `/api/drops/:slug/versions` | List all versions |
 | `GET`    | `/api/drops/:slug/v/:n` | Specific version metadata + context |
 | `DELETE` | `/api/drops/:slug` | Deletes all versions |
@@ -166,7 +167,9 @@ The landing page also sets a `Link:` HTTP header advertising all of the above.
 
 | Method | Path | Notes |
 |---|---|---|
-| `GET` | `/p/:id` | Viewer (with passcode gate when locked) |
+| `GET` | `/p/:id` | Viewer (with passcode gate when locked; private drops ask the owner to sign in with GitHub) |
+| `GET` | `/auth/github/owner?slug=:id` | Owner sign-in for a private drop; returns to `/p/:id` |
+| `POST` | `/auth/signout` | Ends the owner session |
 | `GET` | `/p/:id?v=N` | Pinned to a specific version |
 | `GET` | `/p/:id/raw` | Raw HTML, edge-cached for unlocked drops |
 
@@ -241,7 +244,7 @@ src/
     og-png.ts       ─ satori + resvg-wasm PNG renderer (1200×630)
     landing.ts      ─ /
     verify.ts       ─ /verify
-    viewer.ts       ─ /p/:id + passcode gate (with version switcher)
+    viewer.ts       ─ /p/:id + passcode gate + private gate (with version switcher)
 skills/htmlbin/
   SKILL.md          ─ human-browsable mirror of src/skill.ts
 .github/workflows/
