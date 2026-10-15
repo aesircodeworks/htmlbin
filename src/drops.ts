@@ -460,10 +460,11 @@ apiRoutes.put("/drops/:slug", async (c) => {
 
   await c.env.DROPS_KV.put(`html:${slug}:v${nextVersion}`, body.html);
 
-  // The version row always lands. The drop row only moves when this is
-  // the newest version: two overlapping PUTs reserve v6 and v7 in order but
-  // can commit in either order, and the slower v6 must not move the head
-  // (or the title and metadata) back behind v7.
+  // Two overlapping PUTs reserve v6 and v7 in order but can commit in
+  // either order. The head only ever moves forward (MAX), so a slower v6
+  // can't roll it back behind v7. Supplied title/description/metadata
+  // still apply (last commit wins, as with PATCH), so a slower PUT never
+  // silently drops a field it was asked to change.
   await c.env.DB.batch([
     c.env.DB.prepare(
       `INSERT INTO versions (slug, version, size_bytes, context, created_at)
@@ -474,12 +475,12 @@ apiRoutes.put("/drops/:slug", async (c) => {
           SET title = COALESCE(?, title),
               description = COALESCE(?, description),
               metadata = COALESCE(?, metadata),
-              latest_version = ?,
+              latest_version = MAX(latest_version, ?),
               updated_at = ?
-        WHERE slug = ? AND user_id = ? AND latest_version < ?`
+        WHERE slug = ? AND user_id = ?`
     ).bind(
       title ?? null, description ?? null, metadataRaw,
-      nextVersion, now, slug, user.id, nextVersion
+      nextVersion, now, slug, user.id
     ),
   ]);
   if (title !== undefined) await invalidateRecentDrops(c.env);

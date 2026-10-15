@@ -359,9 +359,12 @@ stay truthful. PUT reserves `version_seq + 1` with a compare-and-set
 that loses gets `409 version_conflict` instead of overwriting the
 winner's body. Gaps in the numbering are normal. The 200-version cap
 counts minted numbers (`version_seq`). The reservation orders numbers but
-not commits: PUT's final `UPDATE drops` carries `AND latest_version < ?`,
-so a slower v6 committing after v7 still stores its version row but can't
-move the head (or title/metadata) back.
+not commits: PUT's final `UPDATE drops` sets
+`latest_version = MAX(latest_version, ?)`, so a slower v6 committing
+after v7 stores its version row but can't move the head back. Its
+supplied title/description/metadata still apply (last commit wins, like
+PATCH); don't gate the whole UPDATE on the head, or that PUT returns 200
+having silently dropped a requested field.
 
 `?v=N` query param on the viewer + raw routes pins to a specific
 version. Default = latest. A numeric `v` that isn't a live version
