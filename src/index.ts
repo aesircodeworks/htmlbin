@@ -37,6 +37,7 @@ import {
   getDropWithAuthor,
   listVersions,
   rateLimit,
+  sweepExpiredAuthState,
   versionExists,
 } from "./db";
 import { isValidSlug } from "./slug";
@@ -904,6 +905,12 @@ ${STYLE_INLINE}
 // SENTRY_DSN is unset (dev or pre-setup) the SDK no-ops cleanly.
 const handler: ExportedHandler<Bindings> = {
   fetch: (request, env, ctx) => app.fetch(request, env, ctx),
+  // Cron (wrangler.toml [triggers]): the auth sweep also runs from
+  // /api/auth/start, but on a quiet day nobody calls that, and an unclaimed
+  // plaintext token must not outlive CLAIM_TTL_MS by much.
+  scheduled: (_event, env, ctx) => {
+    ctx.waitUntil(sweepExpiredAuthState(env.DB));
+  },
 };
 
 export default Sentry.withSentry(

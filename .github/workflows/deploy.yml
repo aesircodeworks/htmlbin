@@ -6,9 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+# Read-only by default. Only the deploy job, which posts the preview
+# comment, gets PR write; the e2e job runs `npm ci` and PR code with none.
 permissions:
   contents: read
-  pull-requests: write
 
 # Cancel superseded PR runs but never cancel a main deploy mid-flight.
 concurrency:
@@ -37,6 +38,9 @@ jobs:
   deploy:
     needs: e2e
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v5
 

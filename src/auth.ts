@@ -16,6 +16,9 @@ const VERIFY_TTL_MS = 10 * 60 * 1000; // 10 minutes
 export const CLAIM_TTL_MS = 10 * 60 * 1000;
 const POLL_MIN_INTERVAL_S = 2;
 
+// newPollToken() is 48 base62 chars. Anything else can't match a row.
+const POLL_TOKEN_RE = /^[A-Za-z0-9]{48}$/;
+
 export const authRoutes = new Hono<{
   Bindings: Bindings;
   Variables: Variables;
@@ -84,19 +87,8 @@ authRoutes.get("/auth/poll", async (c) => {
   if (!token)
     return apiError(c, "token_required", "Query parameter `token` is required.", 400);
 
-  // 60/min per poll_token. The token is high-entropy so brute-forcing isn't
-  // feasible — this just caps a misbehaving agent polling in a tight loop.
-  const rl = await rateLimit(c.env.DB, `auth:poll:${token}`, 60, 60_000);
-  if (!rl.ok) {
-    c.header("Retry-After", String(rl.retryAfter));
-    return apiError(
-      c,
-      "rate_limited",
-      "Poll rate exceeded. Respect poll_interval.",
-      429,
-      { retry_after_seconds: rl.retryAfter }
-    );
-  }
+  if (!POLL_TOKEN_RE.test(token))
+    return apiError(c, "not_found", "Poll token not recognized.", 404);
 
   const row = await c.env.DB.prepare(
     `SELECT code, status, label, user_id, api_token, expires_at
@@ -114,6 +106,22 @@ authRoutes.get("/auth/poll", async (c) => {
 
   if (!row)
     return apiError(c, "not_found", "Poll token not recognized.", 404);
+
+  // 60/min per poll_token. The token is high-entropy so brute-forcing isn't
+  // feasible — this just caps a misbehaving agent polling in a tight loop.
+  // Checked only for a token that exists: the limiter writes a row per
+  // bucket, and made-up tokens must not be able to grow that table.
+  const rl = await rateLimit(c.env.DB, `auth:poll:${token}`, 60, 60_000);
+  if (!rl.ok) {
+    c.header("Retry-After", String(rl.retryAfter));
+    return apiError(
+      c,
+      "rate_limited",
+      "Poll rate exceeded. Respect poll_interval.",
+      429,
+      { retry_after_seconds: rl.retryAfter }
+    );
+  }
 
   // Pending past the verify TTL, or verified but not claimed within the
   // claim window: wipe any plaintext token and expire the row.

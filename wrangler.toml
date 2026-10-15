@@ -17,6 +17,11 @@ routes = [
 [observability]
 enabled = true
 
+# Sweeps expired device-code rows (and the plaintext token an unclaimed
+# one holds) plus stale rate-limit buckets. See `scheduled` in src/index.ts.
+[triggers]
+crons = ["*/10 * * * *"]
+
 # Production values. Local dev overrides via .dev.vars, so you don't
 # have to maintain two environments.
 [vars]
