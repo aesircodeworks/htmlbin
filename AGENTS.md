@@ -157,8 +157,9 @@ Device-code flow:
 `HTMLBIN_TOKEN`, then `~/.config/htmlbin/token`.
 
 In local dev, `.dev.vars.example` uses `dev-mock` GitHub OAuth. With
-that sentinel, `/auth/github/start` skips GitHub and redirects to the
-callback with a synthesized identity.
+that sentinel, `POST /auth/github/start` skips GitHub and redirects to the
+callback with a synthesized identity. The sign-in is still bound to the
+browser by a `__Host-hb_oauth_<nonce>` cookie.
 
 ## Asset Gotchas
 

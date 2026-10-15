@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import * as Sentry from "@sentry/cloudflare";
 import type { Bindings, Variables } from "./types";
 import { authRoutes } from "./auth";
-import { githubOAuthRoutes } from "./github-oauth";
+import { canonicalVerifyUrl, githubOAuthRoutes } from "./github-oauth";
 import { apiRoutes } from "./drops";
 import { buildOnboardJson, buildOnboardText } from "./onboard";
 import { landingPage } from "./views/landing";
@@ -39,6 +39,7 @@ import {
 } from "./db";
 import { isValidSlug } from "./slug";
 import { apiError } from "./errors";
+import { getCookie } from "./cookies";
 import { handleMcp } from "./mcp";
 
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
@@ -587,6 +588,8 @@ app.route("/api", apiRoutes);
 // account — cycling tokens no longer creates fresh accounts.
 app.get("/verify", (c) => {
   const code = c.req.query("code") ?? "";
+  const elsewhere = canonicalVerifyUrl(c, code);
+  if (elsewhere) return c.redirect(elsewhere, 302);
   return c.html(verifyPage(c.env, { code }));
 });
 
@@ -825,15 +828,6 @@ function mdHeaders(): Record<string, string> {
     "Cache-Control": "public, max-age=300, s-maxage=3600",
     "Vary": "Accept",
   };
-}
-
-function getCookie(header: string, name: string): string | null {
-  for (const part of header.split(/;\s*/)) {
-    const eq = part.indexOf("=");
-    if (eq === -1) continue;
-    if (part.slice(0, eq) === name) return part.slice(eq + 1);
-  }
-  return null;
 }
 
 function notFoundHtml(publicUrl: string): string {
