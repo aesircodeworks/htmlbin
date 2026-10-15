@@ -3,7 +3,6 @@ import type { Bindings, Variables } from "./types";
 import { hashToken, newPollToken, randomHumanCode } from "./crypto";
 import {
   getUserByTokenHash,
-  insertToken,
   rateLimit,
   sweepExpiredAuthState,
   touchToken,
@@ -135,17 +134,25 @@ authRoutes.get("/auth/poll", async (c) => {
     // One-time read. The conditional UPDATE is the claim: if two polls race,
     // only the one that flips the row gets the token. The token only becomes
     // valid (lands in `tokens`) once claimed, so an unclaimed one can't be
-    // used even if it leaks from the verifications row.
-    const claim = await c.env.DB.prepare(
-      `UPDATE verifications SET api_token = NULL, status = 'claimed'
-        WHERE poll_token = ? AND status = 'verified' AND api_token IS NOT NULL`
-    )
-      .bind(token)
-      .run();
-    if ((claim.meta?.changes ?? 0) === 0) return c.json({ status: "claimed" });
-
+    // used even if it leaks from the verifications row. Saving the token
+    // and claiming the row run in one batch (a transaction): if the save
+    // fails, the row stays verified and the next poll can still claim it.
+    // The INSERT selects from the row it is about to claim, so a losing
+    // racer inserts nothing.
     const tokenHash = await hashToken(row.api_token, c.env.TOKEN_PEPPER);
-    await insertToken(c.env.DB, tokenHash, row.user_id, row.label);
+    const [, claim] = await c.env.DB.batch([
+      c.env.DB.prepare(
+        `INSERT INTO tokens (token_hash, user_id, label, created_at)
+         SELECT ?, user_id, label, ? FROM verifications
+          WHERE poll_token = ? AND status = 'verified' AND api_token IS NOT NULL`
+      ).bind(tokenHash, Date.now(), token),
+      c.env.DB.prepare(
+        `UPDATE verifications SET api_token = NULL, status = 'claimed'
+          WHERE poll_token = ? AND status = 'verified' AND api_token IS NOT NULL`
+      ).bind(token),
+    ]);
+    if ((claim?.meta?.changes ?? 0) === 0) return c.json({ status: "claimed" });
+
     return c.json({
       status: "verified",
       api_token: row.api_token,

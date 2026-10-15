@@ -62,19 +62,16 @@ export async function createUser(
     .run();
 }
 
-export async function insertToken(
+export async function versionExists(
   db: D1Database,
-  tokenHash: string,
-  userId: string,
-  label: string | null
-): Promise<void> {
-  await db
-    .prepare(
-      `INSERT INTO tokens (token_hash, user_id, label, created_at)
-       VALUES (?, ?, ?, ?)`
-    )
-    .bind(tokenHash, userId, label, Date.now())
-    .run();
+  slug: string,
+  version: number
+): Promise<boolean> {
+  const row = await db
+    .prepare(`SELECT 1 AS ok FROM versions WHERE slug = ? AND version = ?`)
+    .bind(slug, version)
+    .first<{ ok: number }>();
+  return row !== null;
 }
 
 export async function getDrop(

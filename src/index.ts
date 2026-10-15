@@ -37,6 +37,7 @@ import {
   getDropWithAuthor,
   listVersions,
   rateLimit,
+  versionExists,
 } from "./db";
 import { isValidSlug } from "./slug";
 import { apiError } from "./errors";
@@ -770,12 +771,15 @@ app.on(["GET", "HEAD"], "/p/:slug/raw", async (c) => {
 
   // ?v=N selects a specific version; default = latest. A number that isn't
   // a live version is a 404 (a deleted one misses in KV below).
+  // The versions row is the authority: a deleted version's KV body can
+  // outlive its row (edge read cache, or a failed KV delete), and must not
+  // be served once the row is gone.
   let v = drop.latest_version;
   const vp = c.req.query("v");
   if (vp) {
     const n = parseInt(vp, 10);
     if (Number.isFinite(n)) {
-      if (n < 1 || n > drop.latest_version) return c.notFound();
+      if (n < 1 || !(await versionExists(c.env.DB, slug, n))) return c.notFound();
       v = n;
     }
   }

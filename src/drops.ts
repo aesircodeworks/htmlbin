@@ -21,6 +21,11 @@ const MAX_DROPS_PER_USER = 500;
 const MAX_VERSIONS_PER_DROP = 200;
 const MAX_DAILY_WRITES = 500;
 const MAX_WRITES_PER_MINUTE = 60;
+// Retry-After for the count caps (drops per account, versions per drop).
+// Time alone doesn't clear them, but convention #6 says every 429 carries
+// the header, and an hour stops a generic backoff loop from spending the
+// write quota on retries that can't succeed.
+const CAP_RETRY_AFTER_SECONDS = 3600;
 const MIN_PASSCODE_LENGTH = 4;
 
 // Drop-level tag bag. Same key/value shape we filter on via
@@ -274,12 +279,13 @@ apiRoutes.post("/drops", async (c) => {
     .bind(user.id)
     .first<{ n: number }>();
   if ((countRow?.n ?? 0) >= MAX_DROPS_PER_USER) {
+    c.header("Retry-After", String(CAP_RETRY_AFTER_SECONDS));
     return apiError(
       c,
       "quota_exceeded",
-      `Account drop quota of ${MAX_DROPS_PER_USER} reached.`,
+      `Account drop quota of ${MAX_DROPS_PER_USER} reached. Delete a drop to free a slot; waiting alone won't.`,
       429,
-      { max: MAX_DROPS_PER_USER }
+      { max: MAX_DROPS_PER_USER, retry_after_seconds: CAP_RETRY_AFTER_SECONDS }
     );
   }
 
@@ -347,14 +353,16 @@ apiRoutes.put("/drops/:slug", async (c) => {
 
   // Rows written before migration 0003 can carry version_seq = 0.
   const seq = Math.max(drop.version_seq ?? 0, drop.latest_version);
-  if (seq >= MAX_VERSIONS_PER_DROP)
+  if (seq >= MAX_VERSIONS_PER_DROP) {
+    c.header("Retry-After", String(CAP_RETRY_AFTER_SECONDS));
     return apiError(
       c,
       "version_limit_reached",
-      `Per-drop version cap of ${MAX_VERSIONS_PER_DROP} reached.`,
+      `Per-drop version cap of ${MAX_VERSIONS_PER_DROP} reached. Version numbers are never reused, so publish a new drop instead.`,
       429,
-      { max: MAX_VERSIONS_PER_DROP }
+      { max: MAX_VERSIONS_PER_DROP, retry_after_seconds: CAP_RETRY_AFTER_SECONDS }
     );
+  }
 
   const body = (await c.req.json().catch(() => null)) as
     | {
@@ -380,7 +388,7 @@ apiRoutes.put("/drops/:slug", async (c) => {
     );
 
   // PUT minted a new version; html is required. Metadata-only updates use PATCH.
-  if (body.html === undefined || body.html === "")
+  if (body.html === undefined || body.html === null || body.html === "")
     return apiError(
       c,
       "html_required",
@@ -452,6 +460,10 @@ apiRoutes.put("/drops/:slug", async (c) => {
 
   await c.env.DROPS_KV.put(`html:${slug}:v${nextVersion}`, body.html);
 
+  // The version row always lands. The drop row only moves when this is
+  // the newest version: two overlapping PUTs reserve v6 and v7 in order but
+  // can commit in either order, and the slower v6 must not move the head
+  // (or the title and metadata) back behind v7.
   await c.env.DB.batch([
     c.env.DB.prepare(
       `INSERT INTO versions (slug, version, size_bytes, context, created_at)
@@ -464,10 +476,10 @@ apiRoutes.put("/drops/:slug", async (c) => {
               metadata = COALESCE(?, metadata),
               latest_version = ?,
               updated_at = ?
-        WHERE slug = ? AND user_id = ?`
+        WHERE slug = ? AND user_id = ? AND latest_version < ?`
     ).bind(
       title ?? null, description ?? null, metadataRaw,
-      nextVersion, now, slug, user.id
+      nextVersion, now, slug, user.id, nextVersion
     ),
   ]);
   if (title !== undefined) await invalidateRecentDrops(c.env);
@@ -668,24 +680,34 @@ apiRoutes.delete("/drops/:slug/v/:n", async (c) => {
 
   // DB first (one batch), then KV: if the KV delete fails we leak an
   // unreachable body rather than leave a version row pointing at nothing.
-  const stmts = [
-    c.env.DB.prepare(`DELETE FROM versions WHERE slug = ? AND version = ?`).bind(slug, n),
-  ];
-  if (n === drop.latest_version) {
-    const newLatest = Math.max(
-      ...versions.filter((v) => v.version !== n).map((v) => v.version)
+  // Both rules are checked inside the batch, not against the list above:
+  // two concurrent deletes of v1 and v2 both saw two versions there.
+  //   1. Delete only while another version remains.
+  //   2. If latest_version no longer names a live version (this delete,
+  //      or one racing it, removed it), move it to the newest live one.
+  //      A PUT that landed since we listed the versions already moved
+  //      latest_version forward to a live row, so it's left alone, and
+  //      version_seq is never touched, so n is never minted again.
+  const [deleted] = await c.env.DB.batch([
+    c.env.DB.prepare(
+      `DELETE FROM versions WHERE slug = ? AND version = ?
+          AND (SELECT COUNT(*) FROM versions WHERE slug = ?) > 1`
+    ).bind(slug, n, slug),
+    c.env.DB.prepare(
+      `UPDATE drops
+          SET latest_version = (SELECT MAX(version) FROM versions WHERE slug = ?),
+              updated_at = ?
+        WHERE slug = ?
+          AND latest_version NOT IN (SELECT version FROM versions WHERE slug = ?)`
+    ).bind(slug, Date.now(), slug, slug),
+  ]);
+  if ((deleted?.meta?.changes ?? 0) === 0)
+    return apiError(
+      c,
+      "last_version_cannot_be_deleted",
+      "A drop must keep at least one version.",
+      409
     );
-    // version_seq is left alone so n is never minted again. Conditional
-    // on n still being the latest: a PUT that landed since we listed the
-    // versions already moved latest_version forward, and must keep it.
-    stmts.push(
-      c.env.DB.prepare(
-        `UPDATE drops SET latest_version = ?, updated_at = ?
-          WHERE slug = ? AND latest_version = ?`
-      ).bind(newLatest, Date.now(), slug, n)
-    );
-  }
-  await c.env.DB.batch(stmts);
   await c.env.DROPS_KV.delete(`html:${slug}:v${n}`);
 
   const updated = await getDrop(c.env.DB, slug);

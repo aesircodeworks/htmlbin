@@ -436,6 +436,28 @@ assert_eq "$NEVER $NEVER_RAW" "404 404" "a never-minted ?v=99 is 404 on viewer a
 LIVE_V3=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/p/$SLUG?v=3")
 assert_eq "$LIVE_V3" "200" "viewer for a live ?v=3 still works"
 
+# Two concurrent deletes of a two-version drop: one may win, the other must
+# get 409, and the drop keeps a live version that /raw still serves.
+SLUG_R=$(curl -s -X POST "$BASE/api/drops" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"title":"e2e race","html":"<p>r1</p>"}' | jq -r .slug)
+curl -s -o /dev/null -X PUT "$BASE/api/drops/$SLUG_R" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"html":"<p>r2</p>"}'
+NULLPUT=$(curl -s -o /dev/null -w "%{http_code}" -X PUT "$BASE/api/drops/$SLUG_R" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"html":null}')
+assert_eq "$NULLPUT" "400" "PUT with html:null is a 400, not a 500"
+for n in 1 2; do
+  curl -s -o /dev/null -w "%{http_code}\n" -X DELETE "$BASE/api/drops/$SLUG_R/v/$n" \
+    -H "Authorization: Bearer $TOKEN" &
+done > "$TMP/racedel.txt"
+wait
+assert_eq "$(sort "$TMP/racedel.txt" | tr '\n' ' ')" "200 409 " "concurrent deletes of both versions: one 200, one 409"
+RACE_RAW=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/p/$SLUG_R/raw")
+assert_eq "$RACE_RAW" "200" "after the race the drop still serves a live version"
+curl -s -o /dev/null -X DELETE "$BASE/api/drops/$SLUG_R" -H "Authorization: Bearer $TOKEN"
+
 # ---------------------------------------------------------------------------
 section "4b. metadata — owner-side tag bag + lookup-then-mutate"
 # ---------------------------------------------------------------------------
