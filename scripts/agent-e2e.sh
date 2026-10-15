@@ -36,6 +36,20 @@ assert_json() {
   if [ "$got" = "$want" ]; then ok "$msg"; else fail "$msg" "got=$got want=$want"; fi
 }
 
+# A human signing in through the dev mock, the way a browser does it:
+# same-origin POST from /verify, keep the binding cookie it sets, follow
+# the redirect to the callback with that cookie. Prints the callback's
+# HTTP status; the page lands in $3.
+gh_signin() {
+  local code="$1" login="$2" out="$3"
+  local hdr="$TMP/gh-start-$RANDOM.hdr" cookie loc
+  curl -s -o /dev/null -D "$hdr" -X POST "$BASE/auth/github/start" \
+    -H "Origin: $BASE" --data-urlencode "code=$code" --data-urlencode "mock_login=$login"
+  cookie=$(grep -i '^set-cookie: __Host-hb_oauth=' "$hdr" | head -1 | sed -E 's/^[^:]*: ([^;]*).*/\1/' | tr -d '\r')
+  loc=$(grep -i '^location:' "$hdr" | head -1 | sed -E 's/^[^:]*: //' | tr -d '\r')
+  curl -s -o "$out" -w "%{http_code}" -H "Cookie: $cookie" "$loc"
+}
+
 # ---------------------------------------------------------------------------
 section "1. discoverability — what an agent sees first"
 # ---------------------------------------------------------------------------
@@ -246,9 +260,27 @@ assert_contains "$NF" '"not_found"' "poll with bad token returns not_found"
 # src/github-oauth.ts). Each run picks a unique mock login so successive
 # test runs against the same local D1 don't collide on github_user_id.
 GH_LOGIN_1="e2e-$RANDOM-$RANDOM"
-VRESP=$(curl -sL -o "$TMP/verify.html" -w "%{http_code}" \
-  "$BASE/auth/github/start?code=$VCODE&mock_login=$GH_LOGIN_1")
-assert_eq "$VRESP" "200" "GET /auth/github/start returns 200 after callback"
+
+# Sign-in is bound to the browser that pressed the button on /verify.
+# None of these may sign anyone in: a plain GET link, a cross-site POST,
+# or a callback that arrives without the binding cookie.
+GET_START=$(curl -s -o /dev/null -w "%{http_code} %{redirect_url}" \
+  "$BASE/auth/github/start?code=$VCODE&mock_login=evil-$RANDOM")
+assert_contains "$GET_START" "302 .*/verify?code=$VCODE" "GET /auth/github/start only redirects to /verify"
+XSITE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/auth/github/start" \
+  -H "Sec-Fetch-Site: cross-site" --data-urlencode "code=$VCODE")
+assert_eq "$XSITE" "403" "cross-site POST /auth/github/start → 403"
+NULLORIGIN=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/auth/github/start" \
+  -H "Origin: null" --data-urlencode "code=$VCODE")
+assert_eq "$NULLORIGIN" "403" "POST /auth/github/start from a sandboxed (null) origin → 403"
+NOCOOKIE=$(curl -s -o /dev/null -w "%{http_code}" \
+  "$BASE/auth/github/callback?state=whatever&code=mock&mock_login=evil-$RANDOM")
+assert_eq "$NOCOOKIE" "400" "callback without the binding cookie → 400"
+STILL=$(curl -s "$BASE/api/auth/poll?token=$POLL")
+assert_contains "$STILL" '"pending"' "none of those signed anyone in (poll still pending)"
+
+VRESP=$(gh_signin "$VCODE" "$GH_LOGIN_1" "$TMP/verify.html")
+assert_eq "$VRESP" "200" "POST /auth/github/start → callback returns 200"
 grep -q -i "done\|verified\|complete" "$TMP/verify.html" \
   && ok "verify page shows success" || fail "verify success" "no confirmation text"
 grep -q "$GH_LOGIN_1" "$TMP/verify.html" \
@@ -458,6 +490,15 @@ curl -s "$BASE/api/drops?metadata.repo=$REPO_ENC&metadata.pr=999" \
   -H "Authorization: Bearer $TOKEN" -o "$TMP/m-miss.json"
 assert_json "$TMP/m-miss.json" '.data | length' '0' "filter with one wrong pair returns no matches (AND)"
 
+# A key with a dot is a flat key, not a nested path.
+jq -n --arg repo "$REPO_TAG" '{metadata:{repo:$repo, pr:"42", "ci.run":"7"}}' \
+| curl -s -X PATCH "$BASE/api/drops/$SLUG_M" \
+    -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+    -d @- > /dev/null
+curl -s "$BASE/api/drops?metadata.repo=$REPO_ENC&metadata.ci.run=7" \
+  -H "Authorization: Bearer $TOKEN" -o "$TMP/m-dotted.json"
+assert_json "$TMP/m-dotted.json" '.data | length' '1' "filter on a dotted key (ci.run) matches"
+
 # Scenario 5: size violations rejected with invalid_arg
 TOO_MANY=$(jq -nc '{title:"x", html:"<p>x</p>", metadata: ([range(11)] | map({(tostring): "v"}) | add)}')
 ERR_KEYS=$(curl -s -X POST "$BASE/api/drops" \
@@ -609,7 +650,7 @@ curl -s -X POST "$BASE/api/auth/start" -H "Content-Type: application/json" \
 C2=$(jq -r .code < "$TMP/start2.json")
 P2=$(jq -r .poll_token < "$TMP/start2.json")
 GH_LOGIN_2="e2e2-$RANDOM-$RANDOM"
-curl -sL -o /dev/null "$BASE/auth/github/start?code=$C2&mock_login=$GH_LOGIN_2"
+gh_signin "$C2" "$GH_LOGIN_2" /dev/null > /dev/null
 curl -s "$BASE/api/auth/poll?token=$P2" -o "$TMP/verified2.json"
 TOKEN2=$(jq -r .api_token < "$TMP/verified2.json")
 [[ "$TOKEN2" == hb_* ]] && ok "second agent gets its own token" || fail "second token" "$TOKEN2"

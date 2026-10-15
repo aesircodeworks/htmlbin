@@ -173,10 +173,23 @@ mints a new token attached to the same `user_id`. The old "paste an
 existing hb_… token" UX was deleted in the same change.
 
 **Routes:** `/auth/github/start` and `/auth/github/callback` live in
-`src/github-oauth.ts`. State binding to the verification row uses the
-verify code as the OAuth `state` param — it's already a short-lived,
-single-use secret. The callback re-checks `verifications.status` after
-GitHub returns, in case the row expired during the round-trip.
+`src/github-oauth.ts`. **The sign-in is bound to the browser that
+pressed the button.** `/verify` renders a form that POSTs the code to
+`/auth/github/start`, which accepts only same-origin POSTs
+(`Sec-Fetch-Site`, falling back to `Origin`; a sandboxed drop's `null`
+origin fails). It sets `__Host-hb_oauth=<nonce>.<verify_code>` (HttpOnly,
+Lax, 10 min) and sends the nonce to GitHub as `state`. The callback reads
+the verify code from that cookie, never from the URL, and clears the
+cookie on every outcome. `GET /auth/github/start` only redirects to
+`/verify`. **Why:** the verify code used to be the `state`. GitHub skips
+consent for an app the account already authorized, so a link to
+`/auth/github/start?code=<attacker's>` (or to GitHub's authorize URL with
+that state) silently bound a returning user's account to the attacker's
+poll token. Don't go back to a GET start or a URL-only state. The callback
+host is `PUBLIC_URL`, so on a PR preview the real-GitHub round-trip lands
+on production's code; e2e covers the flow through the dev mock. The
+callback re-checks `verifications.status` after GitHub returns, in case
+the row expired during the round-trip.
 
 **Bindings:** `GITHUB_CLIENT_ID` is a public `[vars]` entry in
 `wrangler.toml`. `GITHUB_CLIENT_SECRET` is a Worker secret
@@ -184,9 +197,9 @@ GitHub returns, in case the row expired during the round-trip.
 "Authorization callback URL" must be `https://htmlbin.aesir.works/auth/github/callback`.
 
 **Dev mock:** when `GITHUB_CLIENT_ID === "dev-mock"` (the value in
-`.dev.vars.example`), `/auth/github/start` skips the round-trip to
+`.dev.vars.example`), `POST /auth/github/start` skips the round-trip to
 github.com and redirects straight to `/auth/github/callback` with a
-synthesized github identity derived from `?mock_login=<x>`. The
+synthesized github identity derived from the `mock_login` form field. The
 deterministic id (`stableMockId()`) is a SHA-256-based int so two
 different mock logins create two different accounts. **The mock path is
 only reachable when the dev sentinel is set — in production it's
@@ -463,7 +476,7 @@ race-safety at the call site, not the API.
 Salesforce; Stripe explicitly avoided it. If real race rates ever bite
 users, add it later as a thin convenience over the same primitives.
 
-Filter SQL: `AND json_extract(metadata, '$.<key>') = <value>` bound as
+Filter SQL: `AND json_extract(metadata, '$."<key>"') = <value>` (quoted so a dotted key like `ci.run` is one flat key, not a nested path) bound as
 parameters in `listDropsByUser` (`src/db.ts`). The path and value are
 both bound — no string interpolation against user input. No filter
 index in v1; D1 scale is small and the existing `WHERE user_id = ?`
@@ -796,8 +809,9 @@ yourself wanting that, stop and ask the user first.
 
 - **GitHub OAuth dev mock.** `.dev.vars` sets
   `GITHUB_CLIENT_ID=GITHUB_CLIENT_SECRET="dev-mock"`. With that sentinel,
-  `/auth/github/start` skips github.com and redirects straight to the
-  callback with `?mock_login=<x>`. The deterministic mock id derives
+  `POST /auth/github/start` skips github.com and redirects straight to
+  the callback with `?mock_login=<x>` (from the form field; the binding
+  cookie still applies — see `gh_signin` in `scripts/agent-e2e.sh`). The deterministic mock id derives
   from SHA-256 of the login. Production uses real OAuth app credentials
   from `github.com/settings/applications/new`.
 - **D1** in local mode is in `.wrangler/state/`. Run

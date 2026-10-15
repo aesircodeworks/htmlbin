@@ -143,7 +143,9 @@ export async function listDropsByUser(
   const filterWhere = filterClauses ? ` AND ${filterClauses}` : "";
   const filterBinds: unknown[] = [];
   for (const k of filterKeys) {
-    filterBinds.push(`$.${k}`);
+    // Quoted label: `$.repo.name` would read a nested object, but the
+    // key regex allows dots in a flat key. The regex also forbids `"`.
+    filterBinds.push(`$."${k}"`);
     filterBinds.push(filter[k]);
   }
 

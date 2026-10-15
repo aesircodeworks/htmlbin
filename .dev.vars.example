@@ -8,9 +8,9 @@ PUBLIC_URL="http://localhost:8787"
 TOKEN_PEPPER="REPLACE_ME_WITH_A_LONG_RANDOM_STRING"
 
 # GitHub OAuth. The sentinel "dev-mock" short-circuits the round-trip
-# to github.com — /auth/github/start jumps straight to
+# to github.com — POST /auth/github/start jumps straight to
 # /auth/github/callback with a synthesized github user id derived from
-# the `?mock_login=…` query param. The e2e script uses this. Production
+# the `mock_login` form field. The e2e script uses this. Production
 # sets these to real values from github.com/settings/applications/new.
 GITHUB_CLIENT_ID="dev-mock"
 GITHUB_CLIENT_SECRET="dev-mock"

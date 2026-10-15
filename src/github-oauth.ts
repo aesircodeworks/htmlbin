@@ -11,10 +11,13 @@
 //
 // Flow:
 //   1. Human lands on /verify?code=<verify_code>
-//   2. Clicks "Sign in with GitHub" → GET /auth/github/start?code=<verify_code>
-//   3. Worker redirects to github.com/login/oauth/authorize, state=<verify_code>
-//   4. GitHub bounces back to /auth/github/callback?code=<gh_code>&state=<verify_code>
-//   5. Worker exchanges gh_code for an access token, fetches /user
+//   2. Clicks "Sign in with GitHub" → POST /auth/github/start (form field
+//      `code`). Same-origin only.
+//   3. Worker sets a browser-binding cookie `<nonce>.<verify_code>` and
+//      redirects to github.com/login/oauth/authorize, state=<nonce>
+//   4. GitHub bounces back to /auth/github/callback?code=<gh_code>&state=<nonce>
+//   5. Worker checks state against the cookie, takes the verify code from
+//      the cookie, exchanges gh_code for an access token, fetches /user
 //   6. Lookup user by github_user_id; create one if it's the first time
 //   7. Mark the verification row verified + attach api_token; render the
 //      shared success view. The agent's poll claims the token (one-time
@@ -23,28 +26,72 @@
 // Dev mock:
 //   When GITHUB_CLIENT_ID === "dev-mock", /auth/github/start skips the
 //   round-trip to github.com and synthesizes a deterministic github
-//   identity from a `mock_login` query param. The e2e script uses this.
+//   identity from a `mock_login` form field. The e2e script uses this.
 //   Production binds the real client id/secret and the mock path is
 //   unreachable.
+//
+// Why the binding cookie:
+//   The verify code used to be the OAuth state, with nothing tying it to
+//   the browser. Anyone who had authorized the app before could be sent a
+//   link (to /auth/github/start, or straight to GitHub's authorize URL
+//   with state=<attacker's code>); GitHub skips its consent screen for an
+//   app the account already authorized, so the victim's account was bound
+//   to the attacker's poll token without a single prompt. Now the state is
+//   a nonce that only exists in a cookie this site set after a same-origin
+//   POST from /verify, so the sign-in has to start in the victim's own
+//   browser, on our page, from a click.
 
 import { Hono } from "hono";
 import * as Sentry from "@sentry/cloudflare";
 import type { Bindings, Variables } from "./types";
-import { newApiToken, newUserId } from "./crypto";
+import { constantTimeEqual, newApiToken, newUserId, randomBase62 } from "./crypto";
+import { getCookie } from "./cookies";
 import { createUser, getUserByGitHubId, rateLimit } from "./db";
 import { CLAIM_TTL_MS } from "./auth";
 import { verifyPage } from "./views/verify";
 
 const DEV_MOCK = "dev-mock";
 
+// `__Host-` keeps sibling subdomains from planting this cookie. SameSite=Lax
+// still sends it on GitHub's top-level redirect back to the callback.
+const BIND_COOKIE = "__Host-hb_oauth";
+const BIND_TTL_S = 10 * 60;
+const CLEAR_BIND_COOKIE = `${BIND_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
+
+// A cross-site page (or a sandboxed drop, whose origin is "null") must not
+// be able to start a sign-in. Browsers send Sec-Fetch-Site on form POSTs;
+// Origin is the fallback for older ones.
+function isSameOriginPost(c: any): boolean {
+  const site = c.req.header("Sec-Fetch-Site");
+  if (site) return site === "same-origin";
+  return c.req.header("Origin") === new URL(c.req.url).origin;
+}
+
 export const githubOAuthRoutes = new Hono<{
   Bindings: Bindings;
   Variables: Variables;
 }>();
 
-// Start: bounce the human to GitHub (or the dev-mock callback).
-githubOAuthRoutes.get("/auth/github/start", async (c) => {
+// Old GET links land on the verify page; a GET never starts a sign-in.
+githubOAuthRoutes.get("/auth/github/start", (c) => {
   const code = (c.req.query("code") ?? "").trim().toUpperCase();
+  return c.redirect(`/verify?code=${encodeURIComponent(code)}`, 302);
+});
+
+// Start: bind this browser, then bounce the human to GitHub (or the
+// dev-mock callback).
+githubOAuthRoutes.post("/auth/github/start", async (c) => {
+  const form = await c.req.formData().catch(() => null);
+  const code = String(form?.get("code") ?? "").trim().toUpperCase();
+  if (!isSameOriginPost(c)) {
+    return c.html(
+      verifyPage(c.env, {
+        code,
+        error: "Sign-in has to start from this page. Press the button below.",
+      }),
+      403
+    );
+  }
   if (!code) {
     return c.html(
       verifyPage(c.env, {
@@ -89,14 +136,20 @@ githubOAuthRoutes.get("/auth/github/start", async (c) => {
     );
   }
 
+  const nonce = randomBase62(32);
+  c.header(
+    "Set-Cookie",
+    `${BIND_COOKIE}=${nonce}.${code}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${BIND_TTL_S}`
+  );
+
   // Dev mock: short-circuit github.com so e2e + offline dev still works.
   if (c.env.GITHUB_CLIENT_ID === DEV_MOCK) {
-    const mockLogin = (c.req.query("mock_login") ?? "dev-user").slice(0, 40);
+    const mockLogin = String(form?.get("mock_login") ?? "dev-user").slice(0, 40);
     const cbUrl = new URL(`${c.env.PUBLIC_URL}/auth/github/callback`);
-    cbUrl.searchParams.set("state", code);
+    cbUrl.searchParams.set("state", nonce);
     cbUrl.searchParams.set("code", "mock");
     cbUrl.searchParams.set("mock_login", mockLogin);
-    return c.redirect(cbUrl.toString(), 302);
+    return c.redirect(cbUrl.toString(), 303);
   }
 
   const redirectUri = `${c.env.PUBLIC_URL}/auth/github/callback`;
@@ -104,23 +157,33 @@ githubOAuthRoutes.get("/auth/github/start", async (c) => {
   authorize.searchParams.set("client_id", c.env.GITHUB_CLIENT_ID);
   authorize.searchParams.set("redirect_uri", redirectUri);
   authorize.searchParams.set("scope", "read:user");
-  authorize.searchParams.set("state", code);
+  authorize.searchParams.set("state", nonce);
   authorize.searchParams.set("allow_signup", "true");
-  return c.redirect(authorize.toString(), 302);
+  return c.redirect(authorize.toString(), 303);
 });
 
 // Callback: exchange the gh code, look up / create the user, mint the
 // api token, mark verification verified.
 githubOAuthRoutes.get("/auth/github/callback", async (c) => {
-  const state = (c.req.query("state") ?? "").trim().toUpperCase();
+  const nonce = c.req.query("state") ?? "";
   const ghCode = c.req.query("code") ?? "";
   const ghError = c.req.query("error");
 
-  if (!state) {
+  // The binding cookie is single-use: every outcome below clears it.
+  c.header("Set-Cookie", CLEAR_BIND_COOKIE);
+  const bound = getCookie(c.req.header("Cookie") ?? "", BIND_COOKIE) ?? "";
+  const dot = bound.indexOf(".");
+  const boundNonce = dot > 0 ? bound.slice(0, dot) : "";
+  // `state` keeps its old name below: it is the verify code, now read from
+  // the cookie this browser was given, never from the URL.
+  const state = dot > 0 ? bound.slice(dot + 1) : "";
+
+  if (!nonce || !boundNonce || !state || !constantTimeEqual(nonce, boundNonce)) {
     return c.html(
       verifyPage(c.env, {
         code: "",
-        error: "OAuth callback missing state. Start the flow again.",
+        error:
+          "This sign-in didn't start in this browser. Open the link your agent printed and press the button there.",
       }),
       400
     );

@@ -39,6 +39,7 @@ import {
 } from "./db";
 import { isValidSlug } from "./slug";
 import { apiError } from "./errors";
+import { getCookie } from "./cookies";
 import { handleMcp } from "./mcp";
 
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
@@ -825,15 +826,6 @@ function mdHeaders(): Record<string, string> {
     "Cache-Control": "public, max-age=300, s-maxage=3600",
     "Vary": "Accept",
   };
-}
-
-function getCookie(header: string, name: string): string | null {
-  for (const part of header.split(/;\s*/)) {
-    const eq = part.indexOf("=");
-    if (eq === -1) continue;
-    if (part.slice(0, eq) === name) return part.slice(eq + 1);
-  }
-  return null;
 }
 
 function notFoundHtml(publicUrl: string): string {
