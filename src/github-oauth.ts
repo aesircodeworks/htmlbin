@@ -13,11 +13,12 @@
 //   1. Human lands on /verify?code=<verify_code>
 //   2. Clicks "Sign in with GitHub" → POST /auth/github/start (form field
 //      `code`). Same-origin only.
-//   3. Worker sets a browser-binding cookie `<nonce>.<verify_code>` and
-//      redirects to github.com/login/oauth/authorize, state=<nonce>
+//   3. Worker sets a browser-binding cookie `__Host-hb_oauth_<nonce>` =
+//      <verify_code> and redirects to github.com/login/oauth/authorize,
+//      state=<nonce>
 //   4. GitHub bounces back to /auth/github/callback?code=<gh_code>&state=<nonce>
-//   5. Worker checks state against the cookie, takes the verify code from
-//      the cookie, exchanges gh_code for an access token, fetches /user
+//   5. Worker reads the verify code from the cookie named by the state,
+//      exchanges gh_code for an access token, fetches /user
 //   6. Lookup user by github_user_id; create one if it's the first time
 //   7. Mark the verification row verified + attach api_token; render the
 //      shared success view. The agent's poll claims the token (one-time
@@ -44,7 +45,7 @@
 import { Hono } from "hono";
 import * as Sentry from "@sentry/cloudflare";
 import type { Bindings, Variables } from "./types";
-import { constantTimeEqual, newApiToken, newUserId, randomBase62 } from "./crypto";
+import { newApiToken, newUserId, randomBase62 } from "./crypto";
 import { getCookie } from "./cookies";
 import { createUser, getUserByGitHubId, rateLimit } from "./db";
 import { CLAIM_TTL_MS } from "./auth";
@@ -52,11 +53,26 @@ import { verifyPage } from "./views/verify";
 
 const DEV_MOCK = "dev-mock";
 
-// `__Host-` keeps sibling subdomains from planting this cookie. SameSite=Lax
-// still sends it on GitHub's top-level redirect back to the callback.
-const BIND_COOKIE = "__Host-hb_oauth";
+// One cookie per sign-in, named by its nonce, so two agents verifying in
+// two tabs of the same browser don't overwrite each other. `__Host-` keeps
+// sibling subdomains from planting one. SameSite=Lax still sends it on
+// GitHub's top-level redirect back to the callback.
+const BIND_COOKIE_PREFIX = "__Host-hb_oauth_";
 const BIND_TTL_S = 10 * 60;
-const CLEAR_BIND_COOKIE = `${BIND_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
+const NONCE_RE = /^[A-Za-z0-9]{32}$/;
+
+function bindCookie(nonce: string, value: string, maxAge: number): string {
+  return `${BIND_COOKIE_PREFIX}${nonce}=${value}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`;
+}
+
+// The OAuth app's callback is pinned to PUBLIC_URL, so the binding cookie
+// has to be set on that host. A sign-in started anywhere else (a PR
+// preview on workers.dev) is sent to the same page on PUBLIC_URL first.
+export function canonicalVerifyUrl(c: any, code: string): string | null {
+  const canonical = new URL(c.env.PUBLIC_URL).origin;
+  if (new URL(c.req.url).origin === canonical) return null;
+  return `${canonical}/verify?code=${encodeURIComponent(code)}`;
+}
 
 // A cross-site page (or a sandboxed drop, whose origin is "null") must not
 // be able to start a sign-in. Browsers send Sec-Fetch-Site on form POSTs;
@@ -83,6 +99,8 @@ githubOAuthRoutes.get("/auth/github/start", (c) => {
 githubOAuthRoutes.post("/auth/github/start", async (c) => {
   const form = await c.req.formData().catch(() => null);
   const code = String(form?.get("code") ?? "").trim().toUpperCase();
+  const elsewhere = canonicalVerifyUrl(c, code);
+  if (elsewhere) return c.redirect(elsewhere, 303);
   if (!isSameOriginPost(c)) {
     return c.html(
       verifyPage(c.env, {
@@ -137,10 +155,7 @@ githubOAuthRoutes.post("/auth/github/start", async (c) => {
   }
 
   const nonce = randomBase62(32);
-  c.header(
-    "Set-Cookie",
-    `${BIND_COOKIE}=${nonce}.${code}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${BIND_TTL_S}`
-  );
+  c.header("Set-Cookie", bindCookie(nonce, code, BIND_TTL_S));
 
   // Dev mock: short-circuit github.com so e2e + offline dev still works.
   if (c.env.GITHUB_CLIENT_ID === DEV_MOCK) {
@@ -169,16 +184,16 @@ githubOAuthRoutes.get("/auth/github/callback", async (c) => {
   const ghCode = c.req.query("code") ?? "";
   const ghError = c.req.query("error");
 
-  // The binding cookie is single-use: every outcome below clears it.
-  c.header("Set-Cookie", CLEAR_BIND_COOKIE);
-  const bound = getCookie(c.req.header("Cookie") ?? "", BIND_COOKIE) ?? "";
-  const dot = bound.indexOf(".");
-  const boundNonce = dot > 0 ? bound.slice(0, dot) : "";
-  // `state` keeps its old name below: it is the verify code, now read from
-  // the cookie this browser was given, never from the URL.
-  const state = dot > 0 ? bound.slice(dot + 1) : "";
+  // `state` keeps its old name below: it is the verify code, read from the
+  // cookie this browser was given for this nonce, never from the URL.
+  let state = "";
+  if (NONCE_RE.test(nonce)) {
+    state = getCookie(c.req.header("Cookie") ?? "", BIND_COOKIE_PREFIX + nonce) ?? "";
+    // Single-use: every outcome below clears this sign-in's cookie.
+    c.header("Set-Cookie", bindCookie(nonce, "", 0));
+  }
 
-  if (!nonce || !boundNonce || !state || !constantTimeEqual(nonce, boundNonce)) {
+  if (!state) {
     return c.html(
       verifyPage(c.env, {
         code: "",

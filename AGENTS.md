@@ -159,7 +159,7 @@ Device-code flow:
 In local dev, `.dev.vars.example` uses `dev-mock` GitHub OAuth. With
 that sentinel, `POST /auth/github/start` skips GitHub and redirects to the
 callback with a synthesized identity. The sign-in is still bound to the
-browser by the `__Host-hb_oauth` cookie.
+browser by a `__Host-hb_oauth_<nonce>` cookie.
 
 ## Asset Gotchas
 

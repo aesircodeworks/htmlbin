@@ -177,17 +177,20 @@ existing hb_… token" UX was deleted in the same change.
 pressed the button.** `/verify` renders a form that POSTs the code to
 `/auth/github/start`, which accepts only same-origin POSTs
 (`Sec-Fetch-Site`, falling back to `Origin`; a sandboxed drop's `null`
-origin fails). It sets `__Host-hb_oauth=<nonce>.<verify_code>` (HttpOnly,
-Lax, 10 min) and sends the nonce to GitHub as `state`. The callback reads
-the verify code from that cookie, never from the URL, and clears the
-cookie on every outcome. `GET /auth/github/start` only redirects to
+origin fails). It sets `__Host-hb_oauth_<nonce>=<verify_code>` (HttpOnly,
+Lax, 10 min; one cookie per sign-in so two tabs don't collide) and sends
+the nonce to GitHub as `state`. The callback reads the verify code from
+the cookie that nonce names, never from the URL, and clears that cookie
+on every outcome. `GET /auth/github/start` only redirects to
 `/verify`. **Why:** the verify code used to be the `state`. GitHub skips
 consent for an app the account already authorized, so a link to
 `/auth/github/start?code=<attacker's>` (or to GitHub's authorize URL with
 that state) silently bound a returning user's account to the attacker's
 poll token. Don't go back to a GET start or a URL-only state. The callback
-host is `PUBLIC_URL`, so on a PR preview the real-GitHub round-trip lands
-on production's code; e2e covers the flow through the dev mock. The
+host is `PUBLIC_URL`, so the cookie must live there: `/verify` (and the
+start POST) on any other host, e.g. a PR preview, redirects to
+`PUBLIC_URL/verify`. A real-GitHub sign-in therefore always runs
+production's code; e2e covers the flow through the dev mock. The
 callback re-checks `verifications.status` after GitHub returns, in case
 the row expired during the round-trip.
 

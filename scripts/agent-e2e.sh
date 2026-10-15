@@ -40,15 +40,22 @@ assert_json() {
 # same-origin POST from /verify, keep the binding cookie it sets, follow
 # the redirect to the callback with that cookie. Prints the callback's
 # HTTP status; the page lands in $3.
-gh_signin() {
-  local code="$1" login="$2" out="$3"
-  local hdr="$TMP/gh-start-$RANDOM.hdr" cookie loc
+gh_start() {
+  local code="$1" login="$2" hdr cookie loc
+  hdr="$TMP/gh-start-$RANDOM.hdr"
   curl -s -o /dev/null -D "$hdr" -X POST "$BASE/auth/github/start" \
     -H "Origin: $BASE" --data-urlencode "code=$code" --data-urlencode "mock_login=$login"
-  cookie=$(grep -i '^set-cookie: __Host-hb_oauth=' "$hdr" | head -1 | sed -E 's/^[^:]*: ([^;]*).*/\1/' | tr -d '\r')
+  cookie=$(grep -i '^set-cookie: __Host-hb_oauth_' "$hdr" | head -1 | sed -E 's/^[^:]*: ([^;]*).*/\1/' | tr -d '\r')
   loc=$(grep -i '^location:' "$hdr" | head -1 | sed -E 's/^[^:]*: //' | tr -d '\r')
-  curl -s -o "$out" -w "%{http_code}" -H "Cookie: $cookie" "$loc"
+  printf '%s\n%s\n' "$cookie" "$loc"
 }
+gh_finish() {  # $1 = output of gh_start, $2 = where the page lands
+  local cookie loc
+  cookie=$(printf '%s\n' "$1" | sed -n 1p)
+  loc=$(printf '%s\n' "$1" | sed -n 2p)
+  curl -s -o "$2" -w "%{http_code}" -H "Cookie: $cookie" "$loc"
+}
+gh_signin() { gh_finish "$(gh_start "$1" "$2")" "$3"; }
 
 # ---------------------------------------------------------------------------
 section "1. discoverability — what an agent sees first"
@@ -651,6 +658,26 @@ C2=$(jq -r .code < "$TMP/start2.json")
 P2=$(jq -r .poll_token < "$TMP/start2.json")
 GH_LOGIN_2="e2e2-$RANDOM-$RANDOM"
 gh_signin "$C2" "$GH_LOGIN_2" /dev/null > /dev/null
+
+# Two agents verifying at once in the same browser: both bindings survive,
+# finished in the reverse order they were started.
+C3=$(curl -s -X POST "$BASE/api/auth/start" -H "Content-Type: application/json" -d '{}')
+C4=$(curl -s -X POST "$BASE/api/auth/start" -H "Content-Type: application/json" -d '{}')
+S3=$(gh_start "$(echo "$C3" | jq -r .code)" "$GH_LOGIN_2")
+S4=$(gh_start "$(echo "$C4" | jq -r .code)" "$GH_LOGIN_2")
+# The browser sends both binding cookies on each callback.
+BOTH="$(echo "$S3" | sed -n 1p); $(echo "$S4" | sed -n 1p)"
+F4=$(curl -s -o /dev/null -w "%{http_code}" -H "Cookie: $BOTH" "$(echo "$S4" | sed -n 2p)")
+F3=$(curl -s -o /dev/null -w "%{http_code}" -H "Cookie: $BOTH" "$(echo "$S3" | sed -n 2p)")
+assert_eq "$F4 $F3" "200 200" "two concurrent sign-ins in one browser both complete"
+P3=$(curl -s "$BASE/api/auth/poll?token=$(echo "$C3" | jq -r .poll_token)")
+assert_contains "$P3" '"verified"' "the first of two concurrent sign-ins is claimable"
+
+# A sign-in started on another host (a PR preview) moves to PUBLIC_URL,
+# where the binding cookie has to live.
+ELSEWHERE=$(curl -s -o /dev/null -w "%{http_code} %{redirect_url}" \
+  -H "Host: preview.example" "$BASE/verify?code=ABCD-EFGH")
+assert_contains "$ELSEWHERE" "302 $BASE/verify?code=ABCD-EFGH" "/verify on another host redirects to PUBLIC_URL"
 curl -s "$BASE/api/auth/poll?token=$P2" -o "$TMP/verified2.json"
 TOKEN2=$(jq -r .api_token < "$TMP/verified2.json")
 [[ "$TOKEN2" == hb_* ]] && ok "second agent gets its own token" || fail "second token" "$TOKEN2"
