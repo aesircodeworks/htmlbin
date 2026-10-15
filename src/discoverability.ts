@@ -6,6 +6,8 @@
 //   - /llms.txt — the de-facto agent-friendly site index (plain text)
 //   - /.well-known/agent-card.json — compact capability descriptor
 //   - /openapi.json — OpenAPI 3.1 spec for the public API
+//   - /.well-known/patterns/* is served from patterns.ts; it is advertised
+//     here (llms.txt, agent card, OpenAPI, Link header, sitemap)
 //   - HTTP `Link:` headers on the landing page advertising the above
 //   - JSON-LD Service schema on the landing page (added inline in landing.ts)
 //
@@ -13,53 +15,32 @@
 // `Accept: text/markdown`, `Accept: application/json` all do reasonable
 // things on the agent-aimed endpoints.
 
+import { buildPatternIndex } from "./patterns";
+
 export function robotsTxt(publicUrl: string): string {
+  // One group, many User-agent lines. A crawler obeys only the single group
+  // that names it most specifically, so rules placed after the last named
+  // group bind that agent alone. Listing every agent above one shared rule
+  // block keeps the explicit allow-list and applies the disallows to all.
   return `# htmlbin is built for agents. All AI crawlers are welcome.
 # See ${publicUrl}/llms.txt for the agent-friendly site index.
+# Signed and auth-only paths are not crawled, by any agent.
 
 User-agent: *
-Allow: /
-
 User-agent: GPTBot
-Allow: /
-
 User-agent: ChatGPT-User
-Allow: /
-
 User-agent: OAI-SearchBot
-Allow: /
-
 User-agent: ClaudeBot
-Allow: /
-
 User-agent: Claude-Web
-Allow: /
-
 User-agent: anthropic-ai
-Allow: /
-
 User-agent: PerplexityBot
-Allow: /
-
 User-agent: Perplexity-User
-Allow: /
-
 User-agent: Google-Extended
-Allow: /
-
 User-agent: Applebot-Extended
-Allow: /
-
 User-agent: Bytespider
-Allow: /
-
 User-agent: Meta-ExternalAgent
-Allow: /
-
 User-agent: cohere-ai
 Allow: /
-
-# Don't crawl signed or auth-only paths
 Disallow: /api/auth/
 Disallow: /verify
 
@@ -102,15 +83,26 @@ with GitHub. The endpoint does not open its own login.
 The reference skill is at
 ${publicUrl}/.well-known/agent-skills/htmlbin/SKILL.md.
 
+## Patterns
+
+Common drop kinds (PR explainers, summary roundups, plan/spec writeups,
+session explainers) have optional authoring patterns: small markdown
+files with triggers, a content checklist, and layout directions. List
+them at ${publicUrl}/.well-known/patterns/index.json and fetch one at
+${publicUrl}/.well-known/patterns/<name>.md. Patterns installed in
+./.htmlbin/patterns/ or ~/.config/htmlbin/patterns/ take precedence.
+
 ## Endpoints
 
 - ${publicUrl}/                              — landing (memo addressed to agents)
 - ${publicUrl}/index.md                      — landing rendered as markdown (also served when Accept: text/markdown)
-- ${publicUrl}/api/onboard                   — agent onboarding (markdown)
+- ${publicUrl}/api/onboard                   — agent onboarding (JSON descriptor by default; markdown with Accept: text/markdown or ?format=md)
 - ${publicUrl}/openapi.json                  — full OpenAPI 3.1 spec
 - ${publicUrl}/.well-known/agent-card.json   — compact capability descriptor
 - ${publicUrl}/.well-known/agent-skills/index.json  — Agent Skills Discovery (RFC v0.2.0) index
 - ${publicUrl}/.well-known/api-catalog       — API catalog (RFC 9727, linkset+json)
+- ${publicUrl}/.well-known/patterns/index.json      — pattern catalog (official starter patterns, JSON)
+- ${publicUrl}/.well-known/patterns/<name>.md       — one pattern as markdown (prescriptive ones also list a template_url)
 - ${publicUrl}/sitemap.xml                   — sitemap
 
 ## API surface
@@ -142,6 +134,11 @@ ${publicUrl}/.well-known/agent-skills/htmlbin/SKILL.md.
 - GET /p/:slug/raw      → raw HTML, edge-cached
 - GET /p/:slug/raw?v=N  → raw HTML for a specific version
 
+Drops run sandboxed in an opaque origin: scripts, forms, modals, popups
+and downloads work; localStorage, sessionStorage, IndexedDB and cookies
+do not, and the page cannot navigate the top window. Keep page state in
+memory or the URL hash; open outbound links with target="_blank".
+
 ## Limits
 
 - 2 MB per HTML
@@ -156,7 +153,8 @@ ${publicUrl}/.well-known/agent-skills/htmlbin/SKILL.md.
 All errors are JSON: { "error": { "code", "message", "details"? } } with an
 appropriate HTTP status. Switch on error.code. Common codes: unauthorized,
 invalid_token, rate_limited, daily_quota_exceeded, html_too_large,
-forbidden, not_found, version_conflict, passcode_too_short.
+forbidden, not_found, version_conflict, passcode_too_short, quota_exceeded,
+version_limit_reached. Every 429 carries a Retry-After header.
 
 ## Source
 
@@ -171,9 +169,15 @@ export function sitemapXml(publicUrl: string): string {
   const urls = [
     { loc: `${publicUrl}/`, priority: "1.0" },
     { loc: `${publicUrl}/api/onboard`, priority: "0.9" },
-    { loc: `${publicUrl}/mcp`, priority: "0.8" },
+    // /mcp is POST-only (GET answers 405), so it is advertised in the Link
+    // header, llms.txt, the agent card and OpenAPI, but not listed here.
     { loc: `${publicUrl}/llms.txt`, priority: "0.6" },
     { loc: `${publicUrl}/openapi.json`, priority: "0.6" },
+    { loc: `${publicUrl}/.well-known/patterns/index.json`, priority: "0.5" },
+    ...buildPatternIndex(publicUrl).patterns.map((p) => ({
+      loc: p.url,
+      priority: "0.4",
+    })),
   ];
   return `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
@@ -202,9 +206,9 @@ export function agentCard(publicUrl: string): object {
     contact: `${publicUrl}/`,
     onboarding: {
       url: `${publicUrl}/api/onboard`,
-      content_types: ["text/markdown", "application/json"],
+      content_types: ["application/json", "text/markdown"],
       summary:
-        "Single endpoint that returns the full agent protocol as markdown.",
+        "Single endpoint that returns the full agent protocol as a JSON descriptor by default. Send Accept: text/markdown or ?format=md for the same protocol as a markdown walkthrough.",
     },
     auth: {
       type: "device_code",
@@ -224,6 +228,19 @@ export function agentCard(publicUrl: string): object {
     skill: {
       url: `${publicUrl}/.well-known/agent-skills/htmlbin/SKILL.md`,
       summary: "Reference skill for the HTTP API and the MCP tools.",
+    },
+    patterns: {
+      index: `${publicUrl}/.well-known/patterns/index.json`,
+      pattern_url: `${publicUrl}/.well-known/patterns/<name>.md`,
+      summary:
+        "Optional authoring patterns for common drop kinds (PR explainers, summary roundups, plan/spec writeups, session explainers). The index lists each pattern's name, description, triggers, url, and template_url for prescriptive ones. Patterns in ./.htmlbin/patterns/ or ~/.config/htmlbin/patterns/ take precedence.",
+    },
+    drop_runtime: {
+      origin: "opaque (sandboxed)",
+      sandbox_allows: ["scripts", "forms", "modals", "downloads", "popups", "popups-to-escape-sandbox"],
+      unavailable: ["localStorage", "sessionStorage", "IndexedDB", "document.cookie", "top-level navigation"],
+      summary:
+        "Published HTML runs in a sandbox without allow-same-origin. Storage APIs and cookies throw or are unavailable, and requests back to htmlbin carry no cookies, so guard any storage use with try/catch and keep state in memory or the URL hash. Links meant to leave the page need target=\"_blank\".",
     },
     capabilities: [
       {
@@ -346,6 +363,7 @@ export function agentCard(publicUrl: string): object {
       llms_txt: `${publicUrl}/llms.txt`,
       agent_skills_index: `${publicUrl}/.well-known/agent-skills/index.json`,
       api_catalog: `${publicUrl}/.well-known/api-catalog`,
+      patterns_index: `${publicUrl}/.well-known/patterns/index.json`,
     },
     license: "MIT",
   };
@@ -357,7 +375,7 @@ export function openApiSpec(publicUrl: string): object {
     openapi: "3.1.0",
     info: {
       title: "htmlbin API",
-      version: "1.2.0",
+      version: "1.3.0",
       summary:
         "Agent-first HTML hosting. Drop self-contained HTML, get a public URL.",
       description:
@@ -372,6 +390,29 @@ export function openApiSpec(publicUrl: string): object {
           type: "http",
           scheme: "bearer",
           bearerFormat: "hb_<base62>",
+        },
+      },
+      headers: {
+        RetryAfter: {
+          description:
+            "Seconds until a retry can succeed (RFC 9110). Mirrored in the body as error.details.retry_after_seconds. For the count caps (quota_exceeded, version_limit_reached) it is a fixed 3600: time alone does not lift them. Delete a drop to free a drop slot; version numbers are never reused, so at the version cap publish a new drop.",
+          schema: { type: "integer", minimum: 0 },
+        },
+      },
+      responses: {
+        WriteLimited: {
+          description:
+            "Write limit hit. error.code is rate_limited (60 writes/min/account) or daily_quota_exceeded (500 writes/day/account). Every mutating /api/drops call counts.",
+          headers: { "Retry-After": { $ref: "#/components/headers/RetryAfter" } },
+          content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } },
+        },
+        Forbidden: {
+          description: "forbidden: the drop belongs to another account.",
+          content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } },
+        },
+        NotFound: {
+          description: "Not found",
+          content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } },
         },
       },
       schemas: {
@@ -401,12 +442,13 @@ export function openApiSpec(publicUrl: string): object {
         },
         VersionListItem: {
           type: "object",
-          required: ["version", "size_bytes", "created_at"],
+          required: ["version", "size_bytes", "created_at", "is_latest"],
           properties: {
             version: { type: "integer" },
             size_bytes: { type: "integer" },
             has_context: { type: "boolean" },
             created_at: { type: "integer" },
+            is_latest: { type: "boolean", description: "True for the version latest_version points at." },
           },
         },
         Version: {
@@ -417,8 +459,7 @@ export function openApiSpec(publicUrl: string): object {
             version: { type: "integer" },
             size_bytes: { type: "integer" },
             context: {
-              type: "string",
-              nullable: true,
+              type: ["string", "null"],
               description: "Optional reasoning trace recorded at this version",
             },
             created_at: { type: "integer" },
@@ -474,23 +515,55 @@ export function openApiSpec(publicUrl: string): object {
       },
       "/api/onboard": {
         get: {
-          summary: "Agent onboarding instructions",
+          summary: "Agent protocol descriptor",
           description:
-            "Returns the full agent protocol. Markdown by default; pass Accept: application/json for JSON wrapper.",
+            "Returns the full agent protocol. JSON descriptor by default. Send Accept: text/markdown, or ?format=md, for the same protocol as a markdown walkthrough. Responses carry Vary: Accept.",
+          parameters: [
+            {
+              name: "format",
+              in: "query",
+              required: false,
+              description: "md returns the markdown walkthrough instead of JSON.",
+              schema: { type: "string", enum: ["md"] },
+            },
+          ],
           responses: {
             "200": {
-              description: "Onboarding text",
+              description: "Protocol descriptor (JSON) or walkthrough (markdown)",
               content: {
-                "text/markdown": { schema: { type: "string" } },
                 "application/json": {
                   schema: {
                     type: "object",
+                    description:
+                      "Structured protocol descriptor. Field values are mostly descriptive strings and examples, so the nested shapes are documented loosely here; treat the live response as authoritative.",
+                    required: ["schema_version", "name", "public_url", "auth", "publish"],
                     properties: {
-                      instructions: { type: "string" },
-                      public_url: { type: "string" },
+                      schema_version: { type: "string" },
+                      name: { type: "string" },
+                      public_url: { type: "string", format: "uri" },
+                      summary: { type: "string" },
+                      naming_convention: { type: "string" },
+                      spec: { type: "object", description: "URLs of the other discovery surfaces" },
+                      mcp: { type: "object" },
+                      error_shape: { type: "object" },
+                      auth: { type: "object", description: "Device-code flow: type, header, token_format, token_storage, steps[]" },
+                      drop_shape: { type: "object" },
+                      publish: { type: "object" },
+                      iterate: { type: "object", description: "new_version (PUT) and metadata_only (PATCH)" },
+                      list_my_drops: { type: "object" },
+                      other_endpoints: { type: "object" },
+                      patterns: { type: "object", description: "Pattern catalog URLs and resolution order" },
+                      drop_runtime: { type: "object", description: "What published HTML can and cannot do in its sandbox" },
+                      cross_machine: { type: "object" },
+                      limits: { type: "object" },
+                      rate_limits: { type: "object" },
+                      errors: { type: "object" },
+                      recommendations: { type: "object" },
+                      notes: { type: "array", items: { type: "string" } },
                     },
                   },
                 },
+                "text/markdown": { schema: { type: "string" } },
               },
             },
           },
@@ -578,16 +651,15 @@ export function openApiSpec(publicUrl: string): object {
                     type: "object",
                     properties: {
                       user_id: { type: "string" },
-                      created_at: { type: "integer", nullable: true },
+                      created_at: { type: ["integer", "null"] },
                       drop_count: { type: "integer" },
                       token: {
-                        type: "object",
-                        nullable: true,
+                        type: ["object", "null"],
                         properties: {
                           id: { type: "string" },
-                          label: { type: "string", nullable: true },
+                          label: { type: ["string", "null"] },
                           created_at: { type: "integer" },
-                          last_used_at: { type: "integer", nullable: true },
+                          last_used_at: { type: ["integer", "null"] },
                         },
                       },
                     },
@@ -687,7 +759,12 @@ export function openApiSpec(publicUrl: string): object {
               content: { "application/json": { schema: { $ref: "#/components/schemas/Drop" } } },
             },
             "400": { description: "Validation error", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } },
-            "429": { description: "Rate limited or quota exceeded (Retry-After header)", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } },
+            "429": {
+              description:
+                "rate_limited, daily_quota_exceeded, or quota_exceeded (500 drops/account; Retry-After 3600). Every 429 carries Retry-After.",
+              headers: { "Retry-After": { $ref: "#/components/headers/RetryAfter" } },
+              content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } },
+            },
           },
         },
       },
@@ -700,7 +777,8 @@ export function openApiSpec(publicUrl: string): object {
           security: [{ bearerAuth: [] }],
           responses: {
             "200": { description: "Drop", content: { "application/json": { schema: { $ref: "#/components/schemas/Drop" } } } },
-            "404": { description: "Not found", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } },
+            "403": { $ref: "#/components/responses/Forbidden" },
+            "404": { $ref: "#/components/responses/NotFound" },
           },
         },
         put: {
@@ -728,8 +806,15 @@ export function openApiSpec(publicUrl: string): object {
           responses: {
             "200": { description: "Updated — returns the full Drop with bumped latest_version", content: { "application/json": { schema: { $ref: "#/components/schemas/Drop" } } } },
             "400": { description: "Missing html / validation", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } },
+            "403": { $ref: "#/components/responses/Forbidden" },
+            "404": { $ref: "#/components/responses/NotFound" },
             "409": { description: "version_conflict — a concurrent PUT minted the next version first; re-fetch and retry", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } },
-            "429": { description: "Rate limit, daily quota, or per-drop version cap (Retry-After header where applicable)", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } },
+            "429": {
+              description:
+                "rate_limited, daily_quota_exceeded, or version_limit_reached (200 versions/drop; Retry-After 3600). Every 429 carries Retry-After.",
+              headers: { "Retry-After": { $ref: "#/components/headers/RetryAfter" } },
+              content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } },
+            },
           },
         },
         patch: {
@@ -753,6 +838,9 @@ export function openApiSpec(publicUrl: string): object {
           responses: {
             "200": { description: "Updated — returns the full Drop (latest_version unchanged)", content: { "application/json": { schema: { $ref: "#/components/schemas/Drop" } } } },
             "400": { description: "Included html or other validation error", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } },
+            "403": { $ref: "#/components/responses/Forbidden" },
+            "404": { $ref: "#/components/responses/NotFound" },
+            "429": { $ref: "#/components/responses/WriteLimited" },
           },
         },
         delete: {
@@ -760,7 +848,9 @@ export function openApiSpec(publicUrl: string): object {
           security: [{ bearerAuth: [] }],
           responses: {
             "204": { description: "Deleted (no body)" },
-            "404": { description: "Not found", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } },
+            "403": { $ref: "#/components/responses/Forbidden" },
+            "404": { $ref: "#/components/responses/NotFound" },
+            "429": { $ref: "#/components/responses/WriteLimited" },
           },
         },
       },
@@ -776,6 +866,8 @@ export function openApiSpec(publicUrl: string): object {
               description: "Array of versions",
               content: { "application/json": { schema: { type: "array", items: { $ref: "#/components/schemas/VersionListItem" } } } },
             },
+            "403": { $ref: "#/components/responses/Forbidden" },
+            "404": { $ref: "#/components/responses/NotFound" },
           },
         },
       },
@@ -789,7 +881,8 @@ export function openApiSpec(publicUrl: string): object {
           security: [{ bearerAuth: [] }],
           responses: {
             "200": { description: "Version", content: { "application/json": { schema: { $ref: "#/components/schemas/Version" } } } },
-            "404": { description: "Not found", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } },
+            "403": { $ref: "#/components/responses/Forbidden" },
+            "404": { description: "not_found (drop) or version_not_found", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } },
           },
         },
         delete: {
@@ -798,8 +891,10 @@ export function openApiSpec(publicUrl: string): object {
           security: [{ bearerAuth: [] }],
           responses: {
             "200": { description: "Deleted — returns the updated Drop", content: { "application/json": { schema: { $ref: "#/components/schemas/Drop" } } } },
-            "404": { description: "Drop or version not found", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } },
+            "403": { $ref: "#/components/responses/Forbidden" },
+            "404": { description: "not_found (drop) or version_not_found", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } },
             "409": { description: "last_version_cannot_be_deleted", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } },
+            "429": { $ref: "#/components/responses/WriteLimited" },
           },
         },
       },
@@ -826,7 +921,65 @@ export function openApiSpec(publicUrl: string): object {
           },
           responses: {
             "200": { description: "Updated — returns the full Drop", content: { "application/json": { schema: { $ref: "#/components/schemas/Drop" } } } },
-            "400": { description: "Validation error", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } },
+            "400": { description: "passcode_required, passcode_too_short, or invalid_slug", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } },
+            "403": { $ref: "#/components/responses/Forbidden" },
+            "404": { $ref: "#/components/responses/NotFound" },
+            "429": { $ref: "#/components/responses/WriteLimited" },
+          },
+        },
+      },
+      "/.well-known/patterns/index.json": {
+        get: {
+          summary: "Pattern catalog index",
+          description:
+            "Official starter patterns for common drop kinds. Each entry names the pattern and links its markdown; prescriptive patterns also carry template_url, a reference skeleton served as text/plain. Agent-side guidance only: the server never validates published HTML against a pattern.",
+          responses: {
+            "200": {
+              description: "Pattern index",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    required: ["version", "patterns"],
+                    properties: {
+                      version: { type: "string" },
+                      patterns: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          required: ["name", "description", "triggers", "url"],
+                          properties: {
+                            name: { type: "string" },
+                            description: { type: "string" },
+                            triggers: { type: "array", items: { type: "string" } },
+                            url: { type: "string", format: "uri" },
+                            template_url: { type: "string", format: "uri" },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/.well-known/patterns/{filename}": {
+        get: {
+          summary: "One pattern (<name>.md) or its reference skeleton (<name>.template.html)",
+          parameters: [
+            { name: "filename", in: "path", required: true, schema: { type: "string" } },
+          ],
+          responses: {
+            "200": {
+              description: "Pattern markdown, or the skeleton as plain text",
+              content: {
+                "text/markdown": { schema: { type: "string" } },
+                "text/plain": { schema: { type: "string" } },
+              },
+            },
+            "404": { $ref: "#/components/responses/NotFound" },
           },
         },
       },
@@ -875,11 +1028,12 @@ export function linkHeader(publicUrl: string): string {
   const host = publicUrl.replace(/\/$/, "");
   return [
     `<${host}/index.md>; rel="alternate"; type="text/markdown"; title="this page as markdown"`,
-    `<${host}/api/onboard>; rel="describedby"; type="text/markdown"; title="agent onboarding"`,
+    `<${host}/api/onboard>; rel="describedby"; type="application/json"; title="agent onboarding"`,
     `<${host}/openapi.json>; rel="service-desc"; type="application/openapi+json"`,
     `<${host}/.well-known/agent-card.json>; rel="https://agentprotocol.org/agent-card"; type="application/json"`,
     `<${host}/.well-known/agent-skills/index.json>; rel="https://agentskills.io/discovery"; type="application/json"; title="Agent Skills Discovery"`,
     `<${host}/.well-known/api-catalog>; rel="api-catalog"; type="application/linkset+json"`,
+    `<${host}/.well-known/patterns/index.json>; rel="related"; type="application/json"; title="pattern catalog"`,
     `<${host}/llms.txt>; rel="alternate"; type="text/plain"; title="llms.txt"`,
     `<${host}/mcp>; rel="service"; type="application/json"; title="MCP"`,
     `<${host}/sitemap.xml>; rel="sitemap"; type="application/xml"`,

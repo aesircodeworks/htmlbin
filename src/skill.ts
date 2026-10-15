@@ -47,7 +47,8 @@ https://htmlbin.aesir.works/api/onboard
 \`\`\`
 
 It returns JSON by default with \`auth.steps[]\`, \`publish\`, \`iterate\`,
-\`list_my_drops\`, \`other_endpoints\`, \`error_shape\`, \`drop_shape\`, and \`limits\`.
+\`list_my_drops\`, \`other_endpoints\`, \`error_shape\`, \`drop_shape\`, \`patterns\`,
+\`drop_runtime\`, and \`limits\`.
 Markdown variant via \`Accept: text/markdown\` or \`?format=md\`.
 
 **Fetch this once per session before invoking htmlbin endpoints.** The
@@ -387,6 +388,10 @@ setting a passcode. Codes:
 - \`quota_exceeded\` — 500 drops/account
 - \`version_limit_reached\` — 200 versions/drop
 
+For the two caps, \`Retry-After\` is a fixed 3600 because waiting doesn't
+lift them. Delete a drop to free a drop slot. Version numbers are never
+reused, so at the version cap publish a new drop instead.
+
 ## Limits
 
 Read live values from \`/api/onboard.limits\`; current defaults:
@@ -511,13 +516,29 @@ brand_sensing: true
 
 **Why this shape.** Patterns are guidance the *agent* reads and applies — not server-rendered templates the platform serves. htmlbin's server stays thin; the long tail of drop kinds lives in user-space, where it belongs.
 
+## Drop runtime: sandboxed, opaque origin
+
+Every drop is served with a sandbox that allows scripts, forms, modals,
+downloads, and popups, but **not** same-origin access. That holds in the
+viewer iframe and when \`/p/<slug>/raw\` is opened directly. In practice:
+
+- \`localStorage\`, \`sessionStorage\`, and IndexedDB throw or are
+  unavailable, and so is \`document.cookie\`. Wrap any storage call in
+  \`try/catch\` so the page still renders.
+- Keep state in memory or in the URL hash (\`#tab=2\`), not in storage.
+- Requests back to htmlbin carry no cookies. CDN scripts and public
+  CORS-enabled APIs still load.
+- The page can't navigate the top window. Open outbound links with
+  \`target="_blank"\`.
+
 ## What htmlbin won't do (don't suggest these)
 
 - **No login UI, no signup, no email, no dashboard.** The device-code
   flow is the entire human-facing surface. Don't tell the user to "go
   to your dashboard" or "sign in" — there is none.
 - **No build pipeline, no SSR, no backend.** HTML uploads exactly as
-  posted. Inline \`<script>\` runs client-side; that's the limit.
+  posted. Inline \`<script>\` runs client-side in the sandbox above;
+  that's the limit.
 - **No file types other than HTML.** No raw JS endpoints, no image
   hosting, no JSON serving. The viewer iframes the HTML; everything
   the page needs must be inline or remote.

@@ -32,6 +32,7 @@ export function buildOnboardJson(publicUrl: string): object {
       llms_txt: `${publicUrl}/llms.txt`,
       onboard_markdown: `${publicUrl}/api/onboard (Accept: text/markdown)`,
       skill: `${publicUrl}/.well-known/agent-skills/htmlbin/SKILL.md`,
+      patterns_index: `${publicUrl}/.well-known/patterns/index.json`,
     },
     mcp: {
       url: `${publicUrl}/mcp`,
@@ -262,6 +263,38 @@ export function buildOnboardJson(publicUrl: string): object {
         returns: "204 No Content",
       },
     },
+    patterns: {
+      description:
+        "Optional authoring patterns for common drop kinds (PR explainers, summary roundups, plan/spec writeups, session explainers). Each is a markdown file with triggers, a content checklist, and layout directions. Agent-side guidance only: the server never validates HTML against a pattern.",
+      index: `${publicUrl}/.well-known/patterns/index.json`,
+      pattern_url: `${publicUrl}/.well-known/patterns/<name>.md`,
+      index_entry: {
+        name: "string",
+        description: "string",
+        triggers: "string[]",
+        url: "string (the pattern markdown)",
+        template_url: "string (optional; prescriptive patterns only — a reference skeleton served as text/plain)",
+      },
+      resolution_order: [
+        "./.htmlbin/patterns/<name>.md (project-local, wins)",
+        "~/.config/htmlbin/patterns/<name>.md (machine-global)",
+        "the official catalog above",
+        "no pattern: freestyle within the quality floor",
+      ],
+    },
+    drop_runtime: {
+      description:
+        "Published HTML runs in a sandbox without allow-same-origin, so it has an opaque origin both inside the viewer iframe and when /raw is opened directly.",
+      sandbox_allows: ["scripts", "forms", "modals", "downloads", "popups", "popups-to-escape-sandbox"],
+      unavailable: [
+        "localStorage, sessionStorage, and IndexedDB (they throw)",
+        "document.cookie",
+        "cookies on requests back to htmlbin",
+        "navigating the top window",
+      ],
+      guidance:
+        "Guard any storage call with try/catch. Keep page state in memory or the URL hash. Open outbound links with target=\"_blank\".",
+    },
     cross_machine: {
       method:
         "On a new machine, run /api/auth/start and sign in with the same GitHub account at /verify. Both machines end up bound to the same htmlbin account.",
@@ -278,8 +311,9 @@ export function buildOnboardJson(publicUrl: string): object {
       verification_ttl_seconds: 600,
     },
     rate_limits: {
-      response: "429 with `error.code = rate_limited` (or daily_quota_exceeded / quota_exceeded)",
-      retry_after_header: "Set to seconds until the next window opens.",
+      response: "429 with `error.code = rate_limited` (or daily_quota_exceeded / quota_exceeded / version_limit_reached)",
+      retry_after_header:
+        "Set to seconds until the next window opens. For the count caps (quota_exceeded, version_limit_reached) it is a fixed 3600: time alone does not lift them. Delete a drop to free a drop slot; version numbers are never reused, so at the version cap publish a new drop.",
       retry_after_details: "Also returned as `details.retry_after_seconds` in the body.",
     },
     errors: {
@@ -428,7 +462,7 @@ while true; do
   esac
 done
 
-mkdir -p ./.htmlbin && echo "$HTMLBIN_TOKEN" > ./.htmlbin/token
+mkdir -p ./.htmlbin && printf "%s" "$HTMLBIN_TOKEN" > ./.htmlbin/token
 chmod 600 ./.htmlbin/token
 \`\`\`
 
@@ -451,6 +485,13 @@ iframe, so it must look right standalone.
   internally (\`overflow-x: auto\`). The server injects a tail-of-\`<head>\`
   safety net (\`html,body{overflow-x:clip}\`, fluid media) on every served
   drop, but well-authored drops shouldn't rely on it.
+- **Scripts run in a sandboxed, opaque origin.** The sandbox allows scripts,
+  forms, modals, downloads, and popups, but not same-origin access, so
+  \`localStorage\`, \`sessionStorage\`, IndexedDB, and \`document.cookie\`
+  throw or are unavailable, requests back to htmlbin carry no cookies, and
+  the page cannot navigate the top window. Guard any storage call with
+  \`try/catch\`, keep state in memory or the URL hash, and open outbound
+  links with \`target="_blank"\`.
 
 ## Step 3: Upload (creates v1)
 
@@ -481,6 +522,7 @@ Response (HTTP 201): the full \`Drop\` object:
   "locked": false,
   "latest_version": 1,
   "view_count": 0,
+  "metadata": {},
   "created_at": 0,
   "updated_at": 0
 }
@@ -624,6 +666,17 @@ curl -s -X DELETE ${publicUrl}/api/drops/<slug> \\
   -H "Authorization: Bearer $HTMLBIN_TOKEN"
 \`\`\`
 
+## Patterns (optional)
+
+Common drop kinds (PR explainers, summary roundups, plan/spec writeups,
+session explainers) have authoring patterns: small markdown files with
+triggers, a content checklist, and layout directions. List the official
+ones at \`${publicUrl}/.well-known/patterns/index.json\` and fetch one at
+\`${publicUrl}/.well-known/patterns/<name>.md\`. Prescriptive patterns
+also list a \`template_url\` skeleton to fill in. Files in
+\`./.htmlbin/patterns/\` or \`~/.config/htmlbin/patterns/\` take precedence.
+No match means freestyle.
+
 ## Passcode (soft gate)
 
 Set, change, or remove a passcode via \`POST /api/drops/<slug>/passcode\` with
@@ -633,7 +686,11 @@ share gate — not encryption.
 ## Rate limiting
 
 429 responses carry a \`Retry-After\` header and a
-\`details.retry_after_seconds\` field. Back off accordingly.
+\`details.retry_after_seconds\` field. Back off accordingly. Codes:
+\`rate_limited\`, \`daily_quota_exceeded\`, \`quota_exceeded\` (drop cap),
+\`version_limit_reached\` (version cap). For the two caps \`Retry-After\` is
+a fixed 3600: waiting doesn't lift them. Delete a drop to free a slot; at
+the version cap publish a new drop, since version numbers are never reused.
 
 Limits: 60 writes/min and 500 writes/day per account (every mutating call
 counts), 500 drops/account, 200 versions/drop, 2 MB / drop.
@@ -645,8 +702,8 @@ Switch on \`error.code\`. Common codes: \`unauthorized\`, \`invalid_token\`,
 \`rate_limited\`, \`daily_quota_exceeded\`, \`quota_exceeded\`,
 \`html_too_large\`, \`html_required\`, \`title_required\`, \`forbidden\`,
 \`not_found\`, \`version_not_found\`, \`metadata_only_on_patch\`,
-\`last_version_cannot_be_deleted\`, \`version_conflict\`,
-\`passcode_too_short\`, \`token_required\`.
+\`last_version_cannot_be_deleted\`, \`version_limit_reached\`,
+\`version_conflict\`, \`passcode_too_short\`, \`token_required\`.
 
 That's the whole API. Build something good.
 `;

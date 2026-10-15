@@ -83,7 +83,8 @@ assert_contains "$LLMS" "/mcp" "/llms.txt references MCP"
 SITEMAP=$(curl -s "$BASE/sitemap.xml")
 assert_contains "$SITEMAP" "<urlset" "/sitemap.xml is a urlset"
 assert_contains "$SITEMAP" "/api/onboard" "/sitemap.xml lists /api/onboard"
-assert_contains "$SITEMAP" "/mcp" "/sitemap.xml lists /mcp"
+assert_not_contains "$SITEMAP" "/mcp" "/sitemap.xml leaves out POST-only /mcp"
+assert_contains "$SITEMAP" "/.well-known/patterns/index.json" "/sitemap.xml lists the patterns index"
 
 curl -s "$BASE/.well-known/agent-card.json" -o "$TMP/card.json"
 jq -e . < "$TMP/card.json" > /dev/null && ok "agent-card.json is valid JSON" || fail "agent-card.json valid" "parse error"

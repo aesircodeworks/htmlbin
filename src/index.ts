@@ -529,6 +529,11 @@ app.on(["GET", "HEAD"], "/.well-known/api-catalog", (c) => {
           { href: `${host}/api/onboard`, type: "application/json" },
           { href: `${host}/llms.txt`, type: "text/plain" },
           { href: `${host}/mcp`, type: "application/json", title: "MCP" },
+          {
+            href: `${host}/.well-known/patterns/index.json`,
+            type: "application/json",
+            title: "patterns",
+          },
         ],
         status: [
           { href: `${host}/.well-known/agent-card.json`, type: "application/json" },
