@@ -193,7 +193,8 @@ curl -s -X PUT "https://htmlbin.aesir.works/api/drops/<slug>" \
 
 **PUT requires `html`.** The slug never changes; `latest_version`
 increments. Old versions remain at `/p/<slug>?v=N`, and a version number
-is never reused, even after that version is deleted. Returns the full Drop.
+is never reused, even after that version is deleted (its URL then returns
+404). Returns the full Drop.
 If another update to the same drop lands at the same moment, PUT returns
 `409 version_conflict` — re-fetch and retry.
 The MCP tool is `update_drop`.

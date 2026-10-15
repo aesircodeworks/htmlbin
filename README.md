@@ -173,7 +173,9 @@ The landing page also sets a `Link:` HTTP header advertising all of the above.
 ## Versioning
 
 Every `PUT` with new HTML mints a new version on the same slug. The URL
-never changes. Switch versions in the viewer with `?v=N`.
+never changes. Switch versions in the viewer with `?v=N`. A `?v=N` that
+isn't a live version (deleted, or never minted) returns 404 on both
+`/p/:id` and `/p/:id/raw`.
 
 ## Metadata (owner-side tag bag)
 

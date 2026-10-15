@@ -513,7 +513,7 @@ curl -s -X PATCH ${publicUrl}/api/drops/<slug> \\
 
 Including \`html\` in a PATCH returns \`400 metadata_only_on_patch\`.
 
-Humans switch versions in the viewer with \`?v=N\`. Default = latest.
+Humans switch versions in the viewer with \`?v=N\`. Default = latest. A deleted or never-minted N is a 404.
 On the MCP endpoint, \`update_drop\` is the PUT and \`patch_drop\` is the PATCH.
 
 ## Context (optional, opt-in)
