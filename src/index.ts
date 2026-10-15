@@ -617,21 +617,20 @@ app.on(["GET", "HEAD"], "/p/:slug", async (c) => {
     }
   }
 
-  // Optional ?v=N pins to a specific version; default = latest.
+  const versions = await listVersions(c.env.DB, slug);
+
+  // Optional ?v=N pins to a specific version; default = latest. A number
+  // that isn't a live version (deleted, or never minted) is a 404 rather
+  // than a viewer around an empty frame.
   const versionParam = c.req.query("v");
   let viewVersion = drop.latest_version;
   if (versionParam) {
     const n = parseInt(versionParam, 10);
-    if (
-      Number.isFinite(n) &&
-      n >= 1 &&
-      n <= drop.latest_version
-    ) {
+    if (Number.isFinite(n)) {
+      if (!versions.some((v) => v.version === n)) return c.notFound();
       viewVersion = n;
     }
   }
-
-  const versions = await listVersions(c.env.DB, slug);
 
   c.executionCtx.waitUntil(bumpViewCount(c.env.DB, slug));
 
@@ -754,12 +753,16 @@ app.on(["GET", "HEAD"], "/p/:slug/raw", async (c) => {
     }
   }
 
-  // ?v=N selects a specific version; default = latest.
+  // ?v=N selects a specific version; default = latest. A number that isn't
+  // a live version is a 404 (a deleted one misses in KV below).
   let v = drop.latest_version;
   const vp = c.req.query("v");
   if (vp) {
     const n = parseInt(vp, 10);
-    if (Number.isFinite(n) && n >= 1 && n <= drop.latest_version) v = n;
+    if (Number.isFinite(n)) {
+      if (n < 1 || n > drop.latest_version) return c.notFound();
+      v = n;
+    }
   }
 
   const html = await c.env.DROPS_KV.get(`html:${slug}:v${v}`);

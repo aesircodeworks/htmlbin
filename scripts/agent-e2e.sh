@@ -424,6 +424,13 @@ jq -n '{html:"<h1>updated by agent again</h1>"}' \
 assert_json "$TMP/updated3.json" '.latest_version' '3' "PUT after deleting v2 mints v3 (numbers never reused)"
 GONE_V2=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/p/$SLUG/raw?v=2")
 assert_eq "$GONE_V2" "404" "deleted v2 stays gone"
+GONE_V2_VIEW=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/p/$SLUG?v=2")
+assert_eq "$GONE_V2_VIEW" "404" "viewer for deleted v2 is 404, not an empty frame"
+NEVER=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/p/$SLUG?v=99")
+NEVER_RAW=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/p/$SLUG/raw?v=99")
+assert_eq "$NEVER $NEVER_RAW" "404 404" "a never-minted ?v=99 is 404 on viewer and raw"
+LIVE_V3=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/p/$SLUG?v=3")
+assert_eq "$LIVE_V3" "200" "viewer for a live ?v=3 still works"
 
 # ---------------------------------------------------------------------------
 section "4b. metadata — owner-side tag bag + lookup-then-mutate"
@@ -636,6 +643,21 @@ done
 RL=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/p/$SLUG/unlock" \
   -H "Content-Type: application/x-www-form-urlencoded" --data-urlencode "passcode=nope")
 assert_eq "$RL" "429" "unlock attempts are rate limited"
+
+# The cap holds under concurrency too: 20 simultaneous guesses from a fresh
+# client get at most 10 through. Skip the last seconds of a minute so the
+# burst can't straddle two windows.
+while [ $(( $(date +%s) % 60 )) -ge 57 ]; do sleep 1; done
+BURST_IP="198.51.100.$(( RANDOM % 250 + 1 ))"
+for i in $(seq 1 20); do
+  curl -s -o /dev/null -w "%{http_code}\n" -X POST "$BASE/p/$SLUG/unlock" \
+    -H "CF-Connecting-IP: $BURST_IP" \
+    -H "Content-Type: application/x-www-form-urlencoded" --data-urlencode "passcode=nope" &
+done > "$TMP/burst.txt"
+wait
+BURST_OK=$(grep -vc '^429$' "$TMP/burst.txt")
+[ "$BURST_OK" -le 10 ] && ok "20 concurrent guesses: $BURST_OK allowed (cap 10)" \
+  || fail "concurrent unlock cap" "$BURST_OK of 20 got through"
 
 curl -s -X POST "$BASE/api/drops/$SLUG/passcode" \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \

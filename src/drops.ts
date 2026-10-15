@@ -675,11 +675,14 @@ apiRoutes.delete("/drops/:slug/v/:n", async (c) => {
     const newLatest = Math.max(
       ...versions.filter((v) => v.version !== n).map((v) => v.version)
     );
-    // version_seq is left alone so n is never minted again.
+    // version_seq is left alone so n is never minted again. Conditional
+    // on n still being the latest: a PUT that landed since we listed the
+    // versions already moved latest_version forward, and must keep it.
     stmts.push(
       c.env.DB.prepare(
-        `UPDATE drops SET latest_version = ?, updated_at = ? WHERE slug = ?`
-      ).bind(newLatest, Date.now(), slug)
+        `UPDATE drops SET latest_version = ?, updated_at = ?
+          WHERE slug = ? AND latest_version = ?`
+      ).bind(newLatest, Date.now(), slug, n)
     );
   }
   await c.env.DB.batch(stmts);
