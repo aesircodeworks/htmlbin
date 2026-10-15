@@ -221,28 +221,22 @@ export async function rateLimit(
   const windowEnd = windowStart + windowMs;
   const retryAfter = Math.max(1, Math.ceil((windowEnd - now) / 1000));
 
+  // One statement, so concurrent requests can't all read a count under the
+  // limit and all pass. SET expressions see the old row, so the CASE reads
+  // the stored window before it is overwritten. Denied requests still
+  // count, which only matters within the same window.
   const row = await db
-    .prepare(`SELECT count, window_start FROM rate_limits WHERE bucket = ?`)
-    .bind(bucketKey)
-    .first<{ count: number; window_start: number }>();
+    .prepare(
+      `INSERT INTO rate_limits (bucket, count, window_start) VALUES (?, 1, ?)
+       ON CONFLICT(bucket) DO UPDATE SET
+         count = CASE WHEN window_start = excluded.window_start THEN count + 1 ELSE 1 END,
+         window_start = excluded.window_start
+       RETURNING count`
+    )
+    .bind(bucketKey, windowStart)
+    .first<{ count: number }>();
 
-  if (!row || row.window_start !== windowStart) {
-    await db
-      .prepare(
-        `INSERT INTO rate_limits (bucket, count, window_start) VALUES (?, 1, ?)
-         ON CONFLICT(bucket) DO UPDATE SET count = 1, window_start = excluded.window_start`
-      )
-      .bind(bucketKey, windowStart)
-      .run();
-    return { ok: true, retryAfter: 0 };
-  }
-
-  if (row.count >= limit) return { ok: false, retryAfter };
-
-  await db
-    .prepare(`UPDATE rate_limits SET count = count + 1 WHERE bucket = ?`)
-    .bind(bucketKey)
-    .run();
+  if ((row?.count ?? 1) > limit) return { ok: false, retryAfter };
   return { ok: true, retryAfter: 0 };
 }
 

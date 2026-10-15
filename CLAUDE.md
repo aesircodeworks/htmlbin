@@ -355,7 +355,13 @@ winner's body. Gaps in the numbering are normal. The 200-version cap
 counts minted numbers (`version_seq`).
 
 `?v=N` query param on the viewer + raw routes pins to a specific
-version. Default = latest.
+version. Default = latest. A numeric `v` that isn't a live version
+(deleted, or never minted) is a 404 on both routes, not a fallback to
+latest; a non-numeric `v` is ignored.
+
+`DELETE /api/drops/:slug/v/:n` only moves `latest_version` back when `n`
+is still the latest (`UPDATE … WHERE latest_version = ?`), so a PUT that
+lands between its read and its write keeps the version it just minted.
 
 ## Mobile safety net (injected into every served drop)
 
@@ -1006,6 +1012,10 @@ system works.
 - 60 writes / minute / account
 - 500 writes / day / account
 
+The limiter (`rateLimit()` in `src/db.ts`) is one atomic
+`INSERT … ON CONFLICT DO UPDATE … RETURNING count`, so a burst of
+concurrent requests can't all read a count under the limit and pass; the
+e2e fires 20 simultaneous passcode guesses and expects at most 10 through.
 Write limits are keyed by user id, not token (so minting more tokens
 buys nothing), and every mutating `/api/drops` call counts — POST, PUT,
 PATCH, both DELETEs, and `/passcode` — via `enforceWriteLimits()` in
