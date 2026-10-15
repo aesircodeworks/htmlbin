@@ -214,9 +214,15 @@ Tokens are stored as `sha256(pepper || token)` where pepper is in env
 claiming poll, capped at `CLAIM_TTL_MS` (10 min, `src/auth.ts`). The
 token is only written to `tokens` (and only usable) once the poll claims
 it, via a conditional `UPDATE … WHERE status = 'verified'` so two racing
-polls can't both get it. Unclaimed rows are expired and wiped by the poll
-itself and by `sweepExpiredAuthState()` (run from `/api/auth/start`,
-which also prunes stale `rate_limits` buckets). The callback's own
+polls can't both get it. The `tokens` INSERT and that UPDATE run in one
+`db.batch` (a transaction), so a failed save leaves the row claimable
+instead of burning the sign-in. Unclaimed rows are expired and wiped by
+the poll itself and by `sweepExpiredAuthState()`, which runs from a
+10-minute cron (`[triggers]` in `wrangler.toml`, `scheduled` in
+`src/index.ts`) and from `/api/auth/start`, and also prunes stale
+`rate_limits` buckets. The poll rejects a malformed token and looks the
+row up *before* touching the limiter, so made-up tokens can't add
+`rate_limits` rows. The callback's own
 `UPDATE … WHERE status = 'pending'` stops a double-submitted sign-in from
 minting a second token.
 
@@ -352,16 +358,25 @@ stay truthful. PUT reserves `version_seq + 1` with a compare-and-set
 (`UPDATE … WHERE version_seq = ?`) *before* writing KV; a concurrent PUT
 that loses gets `409 version_conflict` instead of overwriting the
 winner's body. Gaps in the numbering are normal. The 200-version cap
-counts minted numbers (`version_seq`).
+counts minted numbers (`version_seq`). The reservation orders numbers but
+not commits: PUT's final `UPDATE drops` carries `AND latest_version < ?`,
+so a slower v6 committing after v7 still stores its version row but can't
+move the head (or title/metadata) back.
 
 `?v=N` query param on the viewer + raw routes pins to a specific
 version. Default = latest. A numeric `v` that isn't a live version
 (deleted, or never minted) is a 404 on both routes, not a fallback to
-latest; a non-numeric `v` is ignored.
+latest; a non-numeric `v` is ignored. Both routes check the `versions`
+row, never just KV: a deleted version's body can outlive its row (KV's
+edge read cache, or a failed KV delete).
 
-`DELETE /api/drops/:slug/v/:n` only moves `latest_version` back when `n`
-is still the latest (`UPDATE … WHERE latest_version = ?`), so a PUT that
-lands between its read and its write keeps the version it just minted.
+`DELETE /api/drops/:slug/v/:n` checks both of its rules inside the batch,
+not against the version list it read first: the DELETE carries
+`AND (SELECT COUNT(*) …) > 1` (no changes → `409
+last_version_cannot_be_deleted`), and the follow-up `UPDATE drops` only
+repairs `latest_version` when it no longer names a live row. So two
+concurrent deletes can't empty a drop, and a PUT that lands meanwhile
+keeps the version it just minted.
 
 ## Mobile safety net (injected into every served drop)
 
@@ -370,7 +385,14 @@ HTML, but the skill is advisory. The guard is `src/safety-net.ts` →
 `injectMobileSafetyNet()`, called from the `/p/:slug/raw` handler in
 `src/index.ts`. It appends a small `<style data-htmlbin-safety>` at the
 tail of `<head>` and injects a viewport meta if the drop didn't ship
-one. CSS is intentionally tiny:
+one. Insertion points come from one forward tag scan
+(`findInsertionPoints`), not regexes over the document: the old
+`<head\b[^>]*>`-style patterns went quadratic on input like
+`<head<head…` and a 2 MB drop could exceed the CPU limit on every view.
+The scan skips comments and `<script>/<style>/<textarea>/<title>` text,
+and with no tag to anchor to it inserts *after* a leading doctype, never
+before it (that forces quirks mode). Keep it linear. CSS is
+intentionally tiny:
 
 ```
 html,body{max-width:100vw;overflow-x:clip}
@@ -417,7 +439,12 @@ fields, snake_case `passcode` on the API) is intentional.
 Unlock cookies (`wu_<slug>`) are HMAC'd over `slug|exp|password_hash`,
 so changing or removing the passcode invalidates every outstanding
 unlock. `POST /p/:slug/unlock` is rate limited to 10 attempts / minute
-per IP per drop (passcodes can be 4 chars).
+per client per drop *and* 100 / hour per drop across all clients
+(passcodes can be 4 chars, and an IPv6 attacker can rotate addresses).
+Per-IP limits everywhere key on `clientIpKey()` (`src/request.ts`),
+which groups IPv6 by /64. It also refuses cross-site form posts
+(`Sec-Fetch-Site`/`Origin`), so another page or a drop can't spend its
+visitors' guesses; clients that send neither header (curl, agents) pass.
 
 Gate page uses `<input type="text">` + CSS `-webkit-text-security: disc` so
 the value masks like a password field but autofill doesn't fire. A tiny
@@ -637,12 +664,15 @@ WASM gotchas (don't relitigate):
   cached in module memory, then bundled into a single KV blob
   (`og-fonts:v1`) so cold starts only do the network fetch once per
   edge node lifetime.
-- Rendered PNGs are KV-cached per slug+version
-  (`og-png:<slug>:v<n>:<rev>`) and per landing
-  (`og-png:landing:v<rev>`). Bump the `:rev` suffix to invalidate.
-- If satori or resvg fail at request time, the route redirects to the
-  SVG variant so social cards never hard-fail. `?debug=1` on the route
-  surfaces the underlying error.
+- Rendered PNGs are KV-cached per slug+version+card state
+  (`og-png:<slug>:v<n>:<hash>:<rev>`, hash of the title or of "locked")
+  and per landing (`og-png:landing:v<rev>`). The hash is there because a
+  PATCHed title or a new passcode doesn't mint a version. Bump the
+  `:rev` suffix to invalidate.
+- Locked drops never render their title on either card (PNG or SVG).
+- If satori or resvg fail at request time, the route logs the error and
+  redirects to the SVG variant so social cards never hard-fail. There is
+  no debug switch that returns the error to the client.
 
 `og-image.ts` (SVG) and `og-png.ts` are **both** in tree on purpose:
 the SVG is the lightweight fallback + per-tab rendering source; the
@@ -805,9 +835,8 @@ yourself wanting that, stop and ask the user first.
   wrangler`. The `.bin/wrangler` shim is installed as a regular file
   (not a symlink), so its `__dirname`-relative path math resolves
   `node_modules/wrangler-dist/cli.js` (wrong) instead of
-  `node_modules/wrangler/wrangler-dist/cli.js`. `stats.mjs` still uses
-  `npx wrangler`; if that breaks the same way, copy the direct-invoke
-  pattern from the dashboard.
+  `node_modules/wrangler/wrangler-dist/cli.js`. `stats.mjs` and
+  `setup.mjs` use the same direct invoke.
 - Vanilla HTML/JS/CSS, no build step, no new npm dependencies. SVG bar
   charts hand-rolled.
 - Routes are hash-based: `#/` overview, `#/u/<user_id>` user detail,
@@ -853,8 +882,8 @@ yourself wanting that, stop and ask the user first.
   to work; if they ever break the same way, copy the direct-invoke
   pattern.
 - **Token prefix is `hb_`.** If you change it, update both
-  `src/auth.ts` (regex) AND `src/crypto.ts:newApiToken` AND
-  `src/index.ts` (existing-token validation regex).
+  `src/auth.ts` (regex) AND `src/crypto.ts:newApiToken`. If you change
+  `newPollToken()`'s length, update `POLL_TOKEN_RE` in `src/auth.ts`.
 - **Style cache busts itself.** `STYLE_HREF` in `src/styles.ts` is
   `/style.css?v=<hash-of-css>`; the hash auto-bumps on any CSS edit so
   you don't need to hard-refresh after a deploy. New views must import
@@ -938,6 +967,8 @@ src/
   crypto.ts         ─ Web Crypto wrappers
   slug.ts           ─ 9-char base62 id generator
   db.ts             ─ D1 helpers + rate limiter
+  recent.ts         ─ KV read-through for the landing's recent-drops feed
+  request.ts        ─ clientIpKey() (IPv6 /64) + cross-site request check
   discoverability.ts─ robots.txt, llms.txt, sitemap, agent-card, openapi, api-catalog
   safety-net.ts     ─ mobile safety-net injector applied to /p/:slug/raw
   styles.ts         ─ THE stylesheet + STYLE_HREF (auto-bumping cache buster)
@@ -1008,7 +1039,8 @@ system works.
 
 - 2 MB / drop (`MAX_HTML_BYTES` in `drops.ts`)
 - 64 KB / context per version
-- 200 versions / drop
+- 200 versions / drop (this 429 and the 500-drop one carry
+  `Retry-After: 3600`, since waiting alone doesn't clear them)
 - 60 writes / minute / account
 - 500 writes / day / account
 
