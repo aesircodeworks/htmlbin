@@ -9,6 +9,7 @@ import {
   touchToken,
 } from "./db";
 import { apiError } from "./errors";
+import { clientIpKey } from "./request";
 
 const VERIFY_TTL_MS = 10 * 60 * 1000; // 10 minutes
 // After the human signs in, the agent gets this long to poll and claim the
@@ -23,7 +24,7 @@ export const authRoutes = new Hono<{
 
 // ----- Public: agent kicks off the device-code flow -----------------------
 authRoutes.post("/auth/start", async (c) => {
-  const ip = c.req.header("CF-Connecting-IP") ?? "unknown";
+  const ip = clientIpKey(c);
   const rl = await rateLimit(c.env.DB, `auth:start:${ip}`, 10, 60_000);
   if (!rl.ok) {
     c.header("Retry-After", String(rl.retryAfter));

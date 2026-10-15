@@ -391,6 +391,10 @@ RAW=$(curl -s "$BASE/p/$SLUG/raw")
 assert_contains "$RAW" "e2e drop" "GET /p/$SLUG/raw serves the HTML body"
 assert_contains "$RAW" "data-htmlbin-safety" "raw HTML carries the mobile safety-net stylesheet"
 assert_contains "$RAW" "name=\"viewport\"" "raw HTML gets a viewport meta injected when missing"
+case "$RAW" in
+  "<!doctype html>"*) ok "safety net leaves the doctype first (no quirks mode)" ;;
+  *) fail "safety net leaves the doctype first" "$(printf %s "$RAW" | head -c 80)" ;;
+esac
 RC=$(curl -s -o /dev/null -w "%{content_type}" "$BASE/p/$SLUG/raw")
 assert_contains "$RC" "text/html" "raw is served as text/html"
 RCSP=$(curl -s -D - -o /dev/null "$BASE/p/$SLUG/raw" | tr -d '\r' | grep -i '^content-security-policy:')
@@ -610,6 +614,11 @@ assert_eq "$LC" "302" "locked /raw returns 302"
 GATE=$(curl -s "$BASE/p/$SLUG")
 assert_contains "$GATE" "locked" "viewer shows passcode gate when locked"
 assert_contains "$GATE" "soft gate" "gate explains the lock"
+
+XSITE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/p/$SLUG/unlock" \
+  -H "Sec-Fetch-Site: cross-site" \
+  -H "Content-Type: application/x-www-form-urlencoded" --data-urlencode "passcode=e2e-secret")
+assert_eq "$XSITE" "403" "unlock refuses a cross-site form post"
 
 WRONG=$(curl -s -X POST "$BASE/p/$SLUG/unlock" \
   -H "Content-Type: application/x-www-form-urlencoded" --data-urlencode "passcode=nope")

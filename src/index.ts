@@ -26,6 +26,7 @@ import { STYLES_CSS, STYLE_INLINE } from "./styles";
 import { FONTS } from "./fonts";
 import { injectMobileSafetyNet } from "./safety-net";
 import {
+  sha256Hex,
   signUnlockToken,
   verifyPassword,
   verifyUnlockToken,
@@ -41,6 +42,7 @@ import { isValidSlug } from "./slug";
 import { apiError } from "./errors";
 import { getCookie } from "./cookies";
 import { handleMcp } from "./mcp";
+import { clientIpKey, isCrossSiteBrowserRequest } from "./request";
 
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
@@ -354,7 +356,12 @@ app.get("/p/:slug/og.png", async (c) => {
   const drop = await getDrop(c.env.DB, slug);
   if (!drop) return c.notFound();
 
-  const cacheKey = `og-png:${slug}:v${drop.latest_version}:r3`;
+  // Title and lock state are in the key: a PATCHed title or a new passcode
+  // doesn't mint a version, and must not keep serving the old card.
+  const cardState = await sha256Hex(
+    `${drop.password_hash ? "locked" : drop.title}`
+  );
+  const cacheKey = `og-png:${slug}:v${drop.latest_version}:${cardState.slice(0, 16)}:r4`;
   const cached = await c.env.DROPS_KV.get(cacheKey, { type: "arrayBuffer" });
   if (cached) return pngResponse(cached, true);
 
@@ -672,11 +679,19 @@ app.post("/p/:slug/unlock", async (c) => {
     return c.redirect(`/p/${slug}`, 302);
   }
 
+  // Only the gate's own form may submit guesses. Without this, any page
+  // (or any drop) could spend its visitors' guess budgets on this drop.
+  if (isCrossSiteBrowserRequest(c))
+    return c.html(passcodeGatePage(c.env, drop, { error: true }), 403);
+
   // Passcodes can be as short as 4 chars, so cap guesses per client per
-  // drop. 10/min makes an exhaustive search of even a 4-digit code take
-  // most of a day from one IP.
-  const ip = c.req.header("CF-Connecting-IP") ?? "unknown";
-  const rl = await rateLimit(c.env.DB, `unlock:${slug}:${ip}`, 10, 60_000);
+  // drop (IPv6 grouped by /64), and per drop across all clients: an
+  // attacker rotating addresses gets 100 guesses an hour in total, so even
+  // a 4-digit code holds for days. The cost is that a flood can lock the
+  // gate for an hour; the owner can rotate the passcode.
+  const ip = clientIpKey(c);
+  let rl = await rateLimit(c.env.DB, `unlock:${slug}:${ip}`, 10, 60_000);
+  if (rl.ok) rl = await rateLimit(c.env.DB, `unlock:${slug}`, 100, 3_600_000);
   if (!rl.ok) {
     c.header("Retry-After", String(rl.retryAfter));
     return c.html(

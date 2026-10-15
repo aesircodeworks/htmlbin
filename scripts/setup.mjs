@@ -16,6 +16,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
 const wranglerPath = path.join(root, "wrangler.toml");
 
+// Direct invoke, not `${WRANGLER}`: the .bin shim resolves the wrong
+// path in this repo (see CLAUDE.md, "Wrangler invocation in npm scripts").
+const WRANGLER = "node node_modules/wrangler/bin/wrangler.js";
+
 function sh(cmd) {
   return execSync(cmd, { stdio: ["inherit", "pipe", "inherit"] }).toString();
 }
@@ -26,18 +30,18 @@ function patch(file, find, replace) {
     console.warn(`  (skip) couldn't find placeholder: ${find}`);
     return;
   }
-  writeFileSync(file, orig.replace(find, replace));
+  writeFileSync(file, orig.replaceAll(find, replace));
 }
 
 console.log("→ Creating D1 database 'htmlbin-db' …");
 let d1Out;
 let freshDb = false;
 try {
-  d1Out = sh(`npx wrangler d1 create htmlbin-db`);
+  d1Out = sh(`${WRANGLER} d1 create htmlbin-db`);
   freshDb = true;
 } catch {
   console.log("  (already exists, fetching id from `d1 list`)");
-  d1Out = sh(`npx wrangler d1 list --json`);
+  d1Out = sh(`${WRANGLER} d1 list --json`);
 }
 const d1Match = d1Out.match(/"uuid":\s*"([a-f0-9-]+)"|database_id\s*=\s*"([a-f0-9-]+)"/);
 const d1Id = d1Match?.[1] ?? d1Match?.[2];
@@ -48,7 +52,12 @@ if (!d1Id) {
 console.log(`  D1 id: ${d1Id}`);
 
 console.log("→ Creating KV namespace 'DROPS_KV' …");
-const kvOut = sh(`npx wrangler kv namespace create DROPS_KV`);
+let kvOut = "";
+try {
+  kvOut = sh(`${WRANGLER} kv namespace create DROPS_KV`);
+} catch {
+  console.log("  (create failed — it may already exist)");
+}
 const kvMatch = kvOut.match(/id\s*=\s*"([a-f0-9]+)"/);
 const kvId = kvMatch?.[1];
 if (!kvId) {
@@ -58,13 +67,13 @@ if (!kvId) {
 console.log(`  KV id: ${kvId}`);
 
 console.log("→ Patching wrangler.toml …");
-patch(wranglerPath, /REPLACE_WITH_D1_ID/g, d1Id);
-patch(wranglerPath, /REPLACE_WITH_KV_ID/g, kvId);
+patch(wranglerPath, "REPLACE_WITH_D1_ID", d1Id);
+patch(wranglerPath, "REPLACE_WITH_KV_ID", kvId);
 
 console.log("→ Applying schema (local + remote) …");
-sh(`npx wrangler d1 execute htmlbin-db --local --file=./schema.sql`);
+sh(`${WRANGLER} d1 execute htmlbin-db --local --file=./schema.sql`);
 try {
-  sh(`npx wrangler d1 execute htmlbin-db --remote --file=./schema.sql`);
+  sh(`${WRANGLER} d1 execute htmlbin-db --remote --file=./schema.sql`);
 } catch (e) {
   console.warn("  (remote apply failed — run `npm run db:apply:remote` after deploy)");
 }
@@ -89,7 +98,7 @@ if (freshDb) {
       ";";
     for (const where of ["--local", "--remote"]) {
       try {
-        sh(`npx wrangler d1 execute htmlbin-db ${where} --command "${sql}"`);
+        sh(`${WRANGLER} d1 execute htmlbin-db ${where} --command "${sql}"`);
       } catch {
         console.warn(`  (couldn't mark migrations ${where} — insert them into d1_migrations by hand)`);
       }
@@ -102,8 +111,10 @@ if (freshDb) {
 console.log("→ Setting TOKEN_PEPPER secret …");
 const pepper = randomBytes(32).toString("hex");
 try {
-  execSync(`echo "${pepper}" | npx wrangler secret put TOKEN_PEPPER`, {
-    stdio: "inherit",
+  // On stdin, so the secret never appears in a process list or on screen.
+  execSync(`${WRANGLER} secret put TOKEN_PEPPER`, {
+    input: pepper,
+    stdio: ["pipe", "inherit", "inherit"],
   });
 } catch (e) {
   console.warn("  (couldn't set secret — set manually with `wrangler secret put TOKEN_PEPPER`)");
@@ -122,11 +133,11 @@ console.log("     then run: wrangler secret put GITHUB_CLIENT_SECRET");
 console.log("");
 console.log("  2. For local dev, copy .dev.vars.example to .dev.vars. The");
 console.log("     defaults use a 'dev-mock' sentinel that short-circuits");
-console.log("     github.com so the e2e script works offline. Replace");
-console.log("     TOKEN_PEPPER with the value generated above:");
-console.log("       TOKEN_PEPPER=\"" + pepper + "\"");
+console.log("     github.com so the e2e script works offline. Give local");
+console.log("     dev its own TOKEN_PEPPER (never production's): paste the");
+console.log("     output of `openssl rand -hex 32` as TOKEN_PEPPER, and keep");
 console.log("       GITHUB_CLIENT_ID=\"dev-mock\"");
 console.log("       GITHUB_CLIENT_SECRET=\"dev-mock\"");
 console.log("");
 console.log("  3. npm run dev   # local at http://localhost:8787");
-console.log("     npm run deploy");
+console.log("     Ship changes through a PR; merging to main deploys.");
