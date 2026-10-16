@@ -50,6 +50,7 @@ import { getCookie } from "./cookies";
 import { createUser, getUserByGitHubId, rateLimit } from "./db";
 import { CLAIM_TTL_MS } from "./auth";
 import { verifyPage } from "./views/verify";
+import { clientIpKey } from "./request";
 
 const DEV_MOCK = "dev-mock";
 
@@ -266,7 +267,7 @@ githubOAuthRoutes.get("/auth/github/callback", async (c) => {
   // Cap callbacks per IP — exchanging codes against github.com is real
   // network spend, and a buggy agent retrying the callback shouldn't
   // hammer it.
-  const ip = c.req.header("CF-Connecting-IP") ?? "unknown";
+  const ip = clientIpKey(c);
   const rl = await rateLimit(c.env.DB, `gh:cb:${ip}`, 20, 60_000);
   if (!rl.ok) {
     return c.html(

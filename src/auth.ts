@@ -3,18 +3,21 @@ import type { Bindings, Variables } from "./types";
 import { hashToken, newPollToken, randomHumanCode } from "./crypto";
 import {
   getUserByTokenHash,
-  insertToken,
   rateLimit,
   sweepExpiredAuthState,
   touchToken,
 } from "./db";
 import { apiError } from "./errors";
+import { clientIpKey } from "./request";
 
 const VERIFY_TTL_MS = 10 * 60 * 1000; // 10 minutes
 // After the human signs in, the agent gets this long to poll and claim the
 // token. Past it the plaintext is wiped and the token never becomes valid.
 export const CLAIM_TTL_MS = 10 * 60 * 1000;
 const POLL_MIN_INTERVAL_S = 2;
+
+// newPollToken() is 48 base62 chars. Anything else can't match a row.
+const POLL_TOKEN_RE = /^[A-Za-z0-9]{48}$/;
 
 export const authRoutes = new Hono<{
   Bindings: Bindings;
@@ -23,7 +26,7 @@ export const authRoutes = new Hono<{
 
 // ----- Public: agent kicks off the device-code flow -----------------------
 authRoutes.post("/auth/start", async (c) => {
-  const ip = c.req.header("CF-Connecting-IP") ?? "unknown";
+  const ip = clientIpKey(c);
   const rl = await rateLimit(c.env.DB, `auth:start:${ip}`, 10, 60_000);
   if (!rl.ok) {
     c.header("Retry-After", String(rl.retryAfter));
@@ -84,19 +87,8 @@ authRoutes.get("/auth/poll", async (c) => {
   if (!token)
     return apiError(c, "token_required", "Query parameter `token` is required.", 400);
 
-  // 60/min per poll_token. The token is high-entropy so brute-forcing isn't
-  // feasible — this just caps a misbehaving agent polling in a tight loop.
-  const rl = await rateLimit(c.env.DB, `auth:poll:${token}`, 60, 60_000);
-  if (!rl.ok) {
-    c.header("Retry-After", String(rl.retryAfter));
-    return apiError(
-      c,
-      "rate_limited",
-      "Poll rate exceeded. Respect poll_interval.",
-      429,
-      { retry_after_seconds: rl.retryAfter }
-    );
-  }
+  if (!POLL_TOKEN_RE.test(token))
+    return apiError(c, "not_found", "Poll token not recognized.", 404);
 
   const row = await c.env.DB.prepare(
     `SELECT code, status, label, user_id, api_token, expires_at
@@ -114,6 +106,22 @@ authRoutes.get("/auth/poll", async (c) => {
 
   if (!row)
     return apiError(c, "not_found", "Poll token not recognized.", 404);
+
+  // 60/min per poll_token. The token is high-entropy so brute-forcing isn't
+  // feasible — this just caps a misbehaving agent polling in a tight loop.
+  // Checked only for a token that exists: the limiter writes a row per
+  // bucket, and made-up tokens must not be able to grow that table.
+  const rl = await rateLimit(c.env.DB, `auth:poll:${token}`, 60, 60_000);
+  if (!rl.ok) {
+    c.header("Retry-After", String(rl.retryAfter));
+    return apiError(
+      c,
+      "rate_limited",
+      "Poll rate exceeded. Respect poll_interval.",
+      429,
+      { retry_after_seconds: rl.retryAfter }
+    );
+  }
 
   // Pending past the verify TTL, or verified but not claimed within the
   // claim window: wipe any plaintext token and expire the row.
@@ -134,17 +142,25 @@ authRoutes.get("/auth/poll", async (c) => {
     // One-time read. The conditional UPDATE is the claim: if two polls race,
     // only the one that flips the row gets the token. The token only becomes
     // valid (lands in `tokens`) once claimed, so an unclaimed one can't be
-    // used even if it leaks from the verifications row.
-    const claim = await c.env.DB.prepare(
-      `UPDATE verifications SET api_token = NULL, status = 'claimed'
-        WHERE poll_token = ? AND status = 'verified' AND api_token IS NOT NULL`
-    )
-      .bind(token)
-      .run();
-    if ((claim.meta?.changes ?? 0) === 0) return c.json({ status: "claimed" });
-
+    // used even if it leaks from the verifications row. Saving the token
+    // and claiming the row run in one batch (a transaction): if the save
+    // fails, the row stays verified and the next poll can still claim it.
+    // The INSERT selects from the row it is about to claim, so a losing
+    // racer inserts nothing.
     const tokenHash = await hashToken(row.api_token, c.env.TOKEN_PEPPER);
-    await insertToken(c.env.DB, tokenHash, row.user_id, row.label);
+    const [, claim] = await c.env.DB.batch([
+      c.env.DB.prepare(
+        `INSERT INTO tokens (token_hash, user_id, label, created_at)
+         SELECT ?, user_id, label, ? FROM verifications
+          WHERE poll_token = ? AND status = 'verified' AND api_token IS NOT NULL`
+      ).bind(tokenHash, Date.now(), token),
+      c.env.DB.prepare(
+        `UPDATE verifications SET api_token = NULL, status = 'claimed'
+          WHERE poll_token = ? AND status = 'verified' AND api_token IS NOT NULL`
+      ).bind(token),
+    ]);
+    if ((claim?.meta?.changes ?? 0) === 0) return c.json({ status: "claimed" });
+
     return c.json({
       status: "verified",
       api_token: row.api_token,

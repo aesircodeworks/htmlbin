@@ -206,7 +206,9 @@ export async function renderDropOgPng(
     month: "short",
     day: "numeric",
   });
-  const titleShort = truncateChars(p.title, 90);
+  // Locked drops never put their title on the card (same rule as the SVG
+  // in og-image.ts): the PNG is what unfurlers actually show.
+  const titleShort = p.isLocked ? "locked drop" : truncateChars(p.title, 90);
   const host = stripScheme(p.publicUrl);
 
   const RED = "#D93025";
@@ -261,7 +263,7 @@ export async function renderDropOgPng(
               fontWeight: 500,
               lineHeight: 1.1,
               letterSpacing: "-0.02em",
-              color: INK,
+              color: p.isLocked ? SOFT : INK,
             },
             titleShort
           ),

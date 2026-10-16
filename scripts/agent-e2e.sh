@@ -83,7 +83,8 @@ assert_contains "$LLMS" "/mcp" "/llms.txt references MCP"
 SITEMAP=$(curl -s "$BASE/sitemap.xml")
 assert_contains "$SITEMAP" "<urlset" "/sitemap.xml is a urlset"
 assert_contains "$SITEMAP" "/api/onboard" "/sitemap.xml lists /api/onboard"
-assert_contains "$SITEMAP" "/mcp" "/sitemap.xml lists /mcp"
+assert_not_contains "$SITEMAP" "/mcp" "/sitemap.xml leaves out POST-only /mcp"
+assert_contains "$SITEMAP" "/.well-known/patterns/index.json" "/sitemap.xml lists the patterns index"
 
 curl -s "$BASE/.well-known/agent-card.json" -o "$TMP/card.json"
 jq -e . < "$TMP/card.json" > /dev/null && ok "agent-card.json is valid JSON" || fail "agent-card.json valid" "parse error"
@@ -391,6 +392,10 @@ RAW=$(curl -s "$BASE/p/$SLUG/raw")
 assert_contains "$RAW" "e2e drop" "GET /p/$SLUG/raw serves the HTML body"
 assert_contains "$RAW" "data-htmlbin-safety" "raw HTML carries the mobile safety-net stylesheet"
 assert_contains "$RAW" "name=\"viewport\"" "raw HTML gets a viewport meta injected when missing"
+case "$RAW" in
+  "<!doctype html>"*) ok "safety net leaves the doctype first (no quirks mode)" ;;
+  *) fail "safety net leaves the doctype first" "$(printf %s "$RAW" | head -c 80)" ;;
+esac
 RC=$(curl -s -o /dev/null -w "%{content_type}" "$BASE/p/$SLUG/raw")
 assert_contains "$RC" "text/html" "raw is served as text/html"
 RCSP=$(curl -s -D - -o /dev/null "$BASE/p/$SLUG/raw" | tr -d '\r' | grep -i '^content-security-policy:')
@@ -431,6 +436,28 @@ NEVER_RAW=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/p/$SLUG/raw?v=99")
 assert_eq "$NEVER $NEVER_RAW" "404 404" "a never-minted ?v=99 is 404 on viewer and raw"
 LIVE_V3=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/p/$SLUG?v=3")
 assert_eq "$LIVE_V3" "200" "viewer for a live ?v=3 still works"
+
+# Two concurrent deletes of a two-version drop: one may win, the other must
+# get 409, and the drop keeps a live version that /raw still serves.
+SLUG_R=$(curl -s -X POST "$BASE/api/drops" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"title":"e2e race","html":"<p>r1</p>"}' | jq -r .slug)
+curl -s -o /dev/null -X PUT "$BASE/api/drops/$SLUG_R" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"html":"<p>r2</p>"}'
+NULLPUT=$(curl -s -o /dev/null -w "%{http_code}" -X PUT "$BASE/api/drops/$SLUG_R" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"html":null}')
+assert_eq "$NULLPUT" "400" "PUT with html:null is a 400, not a 500"
+for n in 1 2; do
+  curl -s -o /dev/null -w "%{http_code}\n" -X DELETE "$BASE/api/drops/$SLUG_R/v/$n" \
+    -H "Authorization: Bearer $TOKEN" &
+done > "$TMP/racedel.txt"
+wait
+assert_eq "$(sort "$TMP/racedel.txt" | tr '\n' ' ')" "200 409 " "concurrent deletes of both versions: one 200, one 409"
+RACE_RAW=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/p/$SLUG_R/raw")
+assert_eq "$RACE_RAW" "200" "after the race the drop still serves a live version"
+curl -s -o /dev/null -X DELETE "$BASE/api/drops/$SLUG_R" -H "Authorization: Bearer $TOKEN"
 
 # ---------------------------------------------------------------------------
 section "4b. metadata — owner-side tag bag + lookup-then-mutate"
@@ -610,6 +637,11 @@ assert_eq "$LC" "302" "locked /raw returns 302"
 GATE=$(curl -s "$BASE/p/$SLUG")
 assert_contains "$GATE" "locked" "viewer shows passcode gate when locked"
 assert_contains "$GATE" "soft gate" "gate explains the lock"
+
+XSITE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/p/$SLUG/unlock" \
+  -H "Sec-Fetch-Site: cross-site" \
+  -H "Content-Type: application/x-www-form-urlencoded" --data-urlencode "passcode=e2e-secret")
+assert_eq "$XSITE" "403" "unlock refuses a cross-site form post"
 
 WRONG=$(curl -s -X POST "$BASE/p/$SLUG/unlock" \
   -H "Content-Type: application/x-www-form-urlencoded" --data-urlencode "passcode=nope")

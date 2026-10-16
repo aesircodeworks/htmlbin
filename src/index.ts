@@ -26,6 +26,7 @@ import { STYLES_CSS, STYLE_INLINE } from "./styles";
 import { FONTS } from "./fonts";
 import { injectMobileSafetyNet } from "./safety-net";
 import {
+  sha256Hex,
   signUnlockToken,
   verifyPassword,
   verifyUnlockToken,
@@ -36,11 +37,14 @@ import {
   getDropWithAuthor,
   listVersions,
   rateLimit,
+  sweepExpiredAuthState,
+  versionExists,
 } from "./db";
 import { isValidSlug } from "./slug";
 import { apiError } from "./errors";
 import { getCookie } from "./cookies";
 import { handleMcp } from "./mcp";
+import { clientIpKey, isCrossSiteBrowserRequest } from "./request";
 
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
@@ -354,7 +358,12 @@ app.get("/p/:slug/og.png", async (c) => {
   const drop = await getDrop(c.env.DB, slug);
   if (!drop) return c.notFound();
 
-  const cacheKey = `og-png:${slug}:v${drop.latest_version}:r3`;
+  // Title and lock state are in the key: a PATCHed title or a new passcode
+  // doesn't mint a version, and must not keep serving the old card.
+  const cardState = await sha256Hex(
+    `${drop.password_hash ? "locked" : drop.title}`
+  );
+  const cacheKey = `og-png:${slug}:v${drop.latest_version}:${cardState.slice(0, 16)}:r4`;
   const cached = await c.env.DROPS_KV.get(cacheKey, { type: "arrayBuffer" });
   if (cached) return pngResponse(cached, true);
 
@@ -520,6 +529,11 @@ app.on(["GET", "HEAD"], "/.well-known/api-catalog", (c) => {
           { href: `${host}/api/onboard`, type: "application/json" },
           { href: `${host}/llms.txt`, type: "text/plain" },
           { href: `${host}/mcp`, type: "application/json", title: "MCP" },
+          {
+            href: `${host}/.well-known/patterns/index.json`,
+            type: "application/json",
+            title: "patterns",
+          },
         ],
         status: [
           { href: `${host}/.well-known/agent-card.json`, type: "application/json" },
@@ -672,11 +686,19 @@ app.post("/p/:slug/unlock", async (c) => {
     return c.redirect(`/p/${slug}`, 302);
   }
 
+  // Only the gate's own form may submit guesses. Without this, any page
+  // (or any drop) could spend its visitors' guess budgets on this drop.
+  if (isCrossSiteBrowserRequest(c))
+    return c.html(passcodeGatePage(c.env, drop, { error: true }), 403);
+
   // Passcodes can be as short as 4 chars, so cap guesses per client per
-  // drop. 10/min makes an exhaustive search of even a 4-digit code take
-  // most of a day from one IP.
-  const ip = c.req.header("CF-Connecting-IP") ?? "unknown";
-  const rl = await rateLimit(c.env.DB, `unlock:${slug}:${ip}`, 10, 60_000);
+  // drop (IPv6 grouped by /64), and per drop across all clients: an
+  // attacker rotating addresses gets 100 guesses an hour in total, so even
+  // a 4-digit code holds for days. The cost is that a flood can lock the
+  // gate for an hour; the owner can rotate the passcode.
+  const ip = clientIpKey(c);
+  let rl = await rateLimit(c.env.DB, `unlock:${slug}:${ip}`, 10, 60_000);
+  if (rl.ok) rl = await rateLimit(c.env.DB, `unlock:${slug}`, 100, 3_600_000);
   if (!rl.ok) {
     c.header("Retry-After", String(rl.retryAfter));
     return c.html(
@@ -755,12 +777,15 @@ app.on(["GET", "HEAD"], "/p/:slug/raw", async (c) => {
 
   // ?v=N selects a specific version; default = latest. A number that isn't
   // a live version is a 404 (a deleted one misses in KV below).
+  // The versions row is the authority: a deleted version's KV body can
+  // outlive its row (edge read cache, or a failed KV delete), and must not
+  // be served once the row is gone.
   let v = drop.latest_version;
   const vp = c.req.query("v");
   if (vp) {
     const n = parseInt(vp, 10);
     if (Number.isFinite(n)) {
-      if (n < 1 || n > drop.latest_version) return c.notFound();
+      if (n < 1 || !(await versionExists(c.env.DB, slug, n))) return c.notFound();
       v = n;
     }
   }
@@ -885,6 +910,12 @@ ${STYLE_INLINE}
 // SENTRY_DSN is unset (dev or pre-setup) the SDK no-ops cleanly.
 const handler: ExportedHandler<Bindings> = {
   fetch: (request, env, ctx) => app.fetch(request, env, ctx),
+  // Cron (wrangler.toml [triggers]): the auth sweep also runs from
+  // /api/auth/start, but on a quiet day nobody calls that, and an unclaimed
+  // plaintext token must not outlive CLAIM_TTL_MS by much.
+  scheduled: (_event, env, ctx) => {
+    ctx.waitUntil(sweepExpiredAuthState(env.DB));
+  },
 };
 
 export default Sentry.withSentry(
